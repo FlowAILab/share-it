@@ -156,7 +156,7 @@ def render_markdown(session, messages, redact_secrets=True, include_thinking=Fal
 
 
 def clipboard_html(session, messages, include_tools=False, include_thinking=False,
-                   redact_secrets=True):
+                   redact_secrets=True, tool_input_limit=500, tool_output_limit=1200):
     """Inline-styled HTML for the pasteboard — web apps strip <style> blocks on
     paste, so every style is an attribute. Escape-first; no raw HTML passes."""
     def clean(t):
@@ -176,8 +176,8 @@ def clipboard_html(session, messages, include_tools=False, include_thinking=Fals
         if r == "tool":
             if not include_tools:
                 continue
-            tin = _esc(truncate_middle(clean(m.get("input") or ""), 500))
-            tout = _esc(truncate_middle(clean(m.get("output") or ""), 1200))
+            tin = _esc(truncate_middle(clean(m.get("input") or ""), tool_input_limit))
+            tout = _esc(truncate_middle(clean(m.get("output") or ""), tool_output_limit))
             body = f'⚙ <b>{_esc(m.get("name", "?"))}</b> {tin}'
             if tout.strip():
                 body += f'<br>→ {tout}'

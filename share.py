@@ -148,28 +148,32 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
         except OSError:
             return o["name"]
 
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        failed = [f for f in pool.map(put, objects) if f]
-    if failed:
-        try:
-            _bundle_call(f"/b/{bundle_id}", method="DELETE")  # best-effort staging cleanup
-        except OSError:
-            pass
-        raise OSError(f"upload failed for: {', '.join(failed)} — nothing was shared")
-    manifest = {"index": index_name, "hours": expires_hours,
-                "objects": [{"name": o["name"], "size": len(o["data"])} for o in objects]}
-    status, body = _bundle_call(f"/bundle/{bundle_id}/commit",
-                                data=json.dumps(manifest).encode(),
-                                headers={"Content-Type": "application/json"})
-    if status != 200:
-        try:
+    def _abort(reason):
+        try:  # best-effort staging cleanup — the daily sweep is the backstop
             _bundle_call(f"/b/{bundle_id}", method="DELETE")
-        except OSError:
+        except Exception:
             pass
-        raise OSError(f"share commit failed ({status}) — nothing was shared")
-    out = json.loads(body)
-    return {"url": out["url"], "provider": "hosted", "ref": f"b/{bundle_id}",
-            "hours": out["hours"]}
+        raise OSError(f"{reason} — nothing was shared")
+
+    try:  # ANY transport/parse failure must roll back, not just clean non-200s
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            failed = [f for f in pool.map(put, objects) if f]
+        if failed:
+            _abort(f"upload failed for: {', '.join(failed)}")
+        manifest = {"index": index_name, "hours": expires_hours,
+                    "objects": [{"name": o["name"], "size": len(o["data"])} for o in objects]}
+        status, body = _bundle_call(f"/bundle/{bundle_id}/commit",
+                                    data=json.dumps(manifest).encode(),
+                                    headers={"Content-Type": "application/json"})
+        if status != 200:
+            _abort(f"share commit failed ({status})")
+        out = json.loads(body)
+        return {"url": out["url"], "provider": "hosted", "ref": f"b/{bundle_id}",
+                "hours": out["hours"]}
+    except OSError:
+        raise
+    except Exception as e:
+        _abort(f"share failed ({e.__class__.__name__})")
 
 
 def new_bundle_id():
@@ -252,7 +256,8 @@ def _snapshot(paths):
     return out
 
 
-def record_share(session, result, opts, size, artifact=None, file_paths=None):
+def record_share(session, result, opts, size, artifact=None, file_paths=None,
+                 counts=None):
     entry = {
         "url": result["url"], "provider": result["provider"], "ref": result["ref"],
         "title": (os.path.basename(artifact) if artifact else session["title"]),
@@ -270,6 +275,7 @@ def record_share(session, result, opts, size, artifact=None, file_paths=None):
         "thinking": bool(opts.get("thinking")), "size": size, "deleted": False,
         "snapshot": _snapshot(file_paths if file_paths is not None
                               else ([artifact] if artifact else [])),
+        **(counts or {}),
     }
     with _LOCK:
         shares = load_shares()

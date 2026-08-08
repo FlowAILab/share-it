@@ -107,10 +107,17 @@ _IMAGE_MARKER = re.compile(r"</?image\b[^>]*>")
 
 def _media_entry(media_type, data_b64, counter):
     """Validated inline-image entry, or None (over cap / empty / malformed —
-    remote-control sessions are known to persist empty base64 sources)."""
+    remote-control sessions are known to persist empty base64 sources).
+    Malformed data must not consume the session cap."""
     if not (isinstance(data_b64, str) and 0 < len(data_b64) <= MEDIA_MAX_ONE):
         return None
     if counter[0] >= MEDIA_MAX_PER_SESSION:
+        return None
+    import base64 as _b64
+    try:
+        if not _b64.b64decode(data_b64, validate=True):
+            return None
+    except (ValueError, TypeError):
         return None
     counter[0] += 1
     return {"media_type": media_type or "image/png", "data": data_b64}

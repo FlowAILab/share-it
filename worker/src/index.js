@@ -89,6 +89,8 @@ export default {
         return new Response("bad manifest", { status: 400 });
       let hours = Number(manifest.hours ?? 0);
       if (!ALLOWED_HOURS.has(hours)) hours = 168;
+      if (!manifest.objects.some((o) => sanitize(o.name) === sanitize(manifest.index)))
+        return new Response("index not in objects", { status: 400 });
       if (manifest.objects.length > MAX_BUNDLE_OBJECTS)
         return Response.json({ error: `too many objects (max ${MAX_BUNDLE_OBJECTS})` }, { status: 413 });
       // verify EVERY referenced object landed with the promised size + total cap
@@ -152,8 +154,7 @@ export default {
         }
         const want = sanitize(name || manifest.index);
         // the manifest is the allowlist — uncommitted strays never serve
-        const listed = want === manifest.index
-          || (manifest.objects || []).some((o) => sanitize(o.name) === want);
+        const listed = (manifest.objects || []).some((o) => sanitize(o.name) === want);
         if (!listed) return new Response("not found", { status: 404 });
         const obj = await env.LINKS.get(`b/${id}/${want}`);
         if (!obj) return new Response("not found", { status: 404 });

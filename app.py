@@ -667,7 +667,9 @@ class Handler(BaseHTTPRequestHandler):
                         _s, _md, card = _render_md(path, opts, upload_artifacts=False)
                         return self._json({"url": cached["url"], "size": cached["size"],
                                            "cached": True, "provider": cached["provider"],
-                                           "expires": cached["expires"], "card": card})
+                                           "expires": cached["expires"], "card": card,
+                                           "n_files": cached.get("n_files", 0),
+                                           "n_images": cached.get("n_images", 0)})
                 (session, messages, media_objs, fobjs, artifact_links,
                  index_name, card, shared_paths, stats, reads) = _assemble_bundle(path, opts)
             except (OSError, ValueError, KeyError) as e:
@@ -676,6 +678,12 @@ class Handler(BaseHTTPRequestHandler):
                 md = _render_index(session, messages, opts, artifact_links,
                                    stats, reads, media_base=None)
                 return self._json({"markdown": md, "card": card})
+            n_obj = 1 + len(media_objs) + len(fobjs)
+            total = sum(len(o["data"]) for o in media_objs + fobjs)
+            if n_obj > 64:
+                return self._json({"error": f"too many objects for one share ({n_obj}/64) — drop some files"}, 400)
+            if total > 100_000_000:
+                return self._json({"error": "share exceeds the 100MB bundle cap — drop some files"}, 400)
             try:
                 bundle_id = share.new_bundle_id()
                 media_base = share._hosted_config()["url"].rstrip("/") + f"/b/{bundle_id}"
@@ -691,7 +699,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # nothing was shared — the client hears exactly why
                 return self._json({"error": f"share failed: {e}"}, 502)
             entry = share.record_share(session, result, opts, len(doc),
-                                       file_paths=shared_paths)
+                                       file_paths=shared_paths,
+                                       counts={"n_files": len(shared_paths),
+                                               "n_images": len(media_objs)})
             return self._json({"url": entry["url"], "size": len(doc), "card": card,
                                "provider": entry["provider"], "expires": entry["expires"],
                                "n_files": len(shared_paths), "n_images": len(media_objs)})
@@ -718,10 +728,14 @@ class Handler(BaseHTTPRequestHandler):
                         fh.write(m["data"])
                     img_paths.append(p)
                 include_tools = opts["mode"] != "human"
+                deep = opts["mode"] == "deep"
+                t_in, t_out = (4000, 10000) if deep else (500, 1200)
                 html = render.clipboard_html(session, messages,
                                              include_tools=include_tools,
                                              include_thinking=opts["thinking"],
-                                             redact_secrets=opts["redact"])
+                                             redact_secrets=opts["redact"],
+                                             tool_input_limit=t_in,
+                                             tool_output_limit=t_out)
                 stats = parsers.session_stats(path, messages)
                 last_request = next((m["text"] for m in reversed(messages)
                                      if m["role"] == "user" and m["text"].strip()), "")
@@ -729,6 +743,7 @@ class Handler(BaseHTTPRequestHandler):
                     session, messages, redact_secrets=opts["redact"],
                     include_thinking=opts["thinking"],
                     messages_only=opts["messages_only"],
+                    tool_input_limit=t_in, tool_output_limit=t_out,
                     stats=stats, mode=opts["mode"], last_request=last_request,
                     cwd=session.get("cwd") or None)
                 n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")

@@ -170,9 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        // don't vanish beneath our own Quick Look panel
-        if QLPreviewPanel.sharedPreviewPanelExists(),
-           QLPreviewPanel.shared().isVisible { return }
+        // don't vanish beneath our own Quick Look panel (isVisible can lag the
+        // key-window switch, so existence alone must be the guard)
+        if QLPreviewPanel.sharedPreviewPanelExists() { return }
         panel.orderOut(nil)
     }
 
@@ -231,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 ql.reloadData()
                 NotificationCenter.default.addObserver(
                     forName: NSWindow.willCloseNotification, object: ql, queue: .main) { [weak self] _ in
+                    self?.panel.makeKeyAndOrderFront(nil)
                     self?.webView.evaluateJavaScript("window.__qlClosed && window.__qlClosed()")
                 }
             }

@@ -148,10 +148,10 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .art.a-ref { border-style: dashed; }
 .linkrow .share-meta { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .art:hover { border-color: var(--dim); }
-.art.picked { border-color: var(--ink); color: var(--ink); background: var(--fill-hi); }
+.art.picked { border-color: rgba(255,255,255,0.22); color: var(--ink); }
 .share.small { padding: 4px 14px; font-size: 11.5px; }
-.share.ghost { background: none; border: 1px solid var(--faint); color: var(--ink); animation: none; }
-.share.ghost:hover { border-color: var(--ink); filter: none; }
+.share.ghost { background: var(--fill); border: 1px solid var(--hair); color: var(--dim); animation: none; }
+.share.ghost:hover { color: var(--ink); background: rgba(255,255,255,0.09); filter: none; }
 .resume { font-size: 11px; color: var(--faint); }
 .resume:hover { color: var(--ink); }
 .openin { display: inline-flex; align-items: center; gap: 5px; }
@@ -280,12 +280,11 @@ function smartCopy() {
 
 async function copyChat(s) {
   try {
-    const sel = (s._selTouched || s._sel?.size) ? [...(s._sel || [])] : undefined;
+    const sel = peekCache[s.path] ? [...(s._sel || [])] : undefined;
     const d = await api("/api/copy_chat", {path: s.path, mode: opts.mode,
       redact: opts.redact, ...(sel ? {files: sel} : {})});
-    const parts = [`Copied chat`];
-    if (d.images?.length) parts.push(`${d.images.length} image${d.images.length > 1 ? "s" : ""}`);
-    if (d.files?.length) parts.push(`${d.files.length} file${d.files.length > 1 ? "s" : ""}`);
+    const parts = [`Copied chat`, `${d.messages} messages`];
+    if (d.files?.length) parts.push(`${d.files.length} artifact${d.files.length > 1 ? "s" : ""}`);
     if (nativeCmd("copyRich", d.files || [], {html: d.html, markdown: d.markdown, images: d.images || []})) {
       toast(parts.join(" · ") + " — paste anywhere");
     } else {
@@ -323,7 +322,8 @@ function menuItemsFor(s) {
   const fp = files.map((f) => f.path);
   const nf = files.length;
   // what ⌘C actually carries: your selection, else the primary deliverable, else everything
-  const selPaths = s._sel?.size ? [...s._sel] : (p?.primary?.length ? p.primary : fp);
+  const selPaths = s._sel?.size ? [...s._sel]
+    : (s._selTouched ? [] : (p?.primary?.length ? p.primary : fp));
   const nSelM = selPaths.length;
   const base = (q) => q.split("/").pop();
   const payload = nSelM === 1 ? base(selPaths[0]) : `${nSelM} files`;
@@ -823,7 +823,7 @@ function cardHtml(s) {
     const selmark = on ? '<b class="selmark">✓</b>' : "";
     const kindWord = {"a-new": "created", "a-mod": "modified", "a-ref": "read (referenced)"}[cls];
     const tip = `${kindWord} · ${a.path}${a.size != null ? ` · ${fmtSize(a.size)}` : ""}` +
-      `\nclick select · 2×click open · right-click Quick Look · ⌘C copy · ⌥click reveal` +
+      `\nclick select · 2×click open · right-click Quick Look · ⇧⌘C copy · ⌥click reveal` +
       `${a.head ? "\n\n" + a.head.slice(0, 90) + "…" : ""}`;
     return `<span class="art ${cls}${on ? " picked" : ""}" data-art="${esc(a.path)}" title="${esc(tip)}">
       ${selmark}<span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
@@ -853,13 +853,11 @@ function cardHtml(s) {
   const arts = groups.length ? `<div class="ctl arts">${groups.join("")}
     ${nAll > 1 ? `<span role="button" tabindex="0" class="tog" id="art-all" title="${nSel === nAll ? "unselect all" : "select every file"}">${nSel === nAll ? "none" : "all"}</span>` : ""}
     ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⇧⌘C</kbd></button>
-      <button class="share small" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"} ⏎</button>` : ""}
+      <button class="share small" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"}</button>` : ""}
   </div>` : "";
   const expLbl = {0: "no expiry", 24: "1d", 72: "3d", 168: "7d"}[opts.expiry] || "no expiry";
   const paySum = p ? `<div class="paysum">${opts.mode} · ${
-    nSel ? `${nSel} file${nSel > 1 ? "s" : ""} ✓` : "chat only"} · ${expLbl} · ${
-    opts.redact ? "text scrubbed" : "not scrubbed"}${
-    (p.artifacts || []).length || (p.reads || []).length ? "" : ""}</div>` : "";
+    nSel ? `${nSel} file${nSel > 1 ? "s" : ""} ✓` : "chat only"} · ${expLbl}</div>` : "";
   const openTarget = openTargetFor(s);
   const resume = `<div class="ctl">${openTarget ? `<button class="actbtn" id="resume"
     title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</button>` : ""}
@@ -951,6 +949,7 @@ async function shareSelectedArtifacts(s) {
     .map((f, _, arr) => arr.length > 1 ? `${f.split("/").pop()}: ${s._art[f].url}` : s._art[f].url);
   if (lines.length) {
     copyText(lines.join("\n"));
+    toast(`Link${lines.length > 1 ? "s" : ""} copied · ${lines.length} file${lines.length > 1 ? "s" : ""}`);
     files.forEach((f) => flashCopied(f));
     s._sel.clear();
     s._share = null;  // session-link file set changed with the selection
@@ -988,8 +987,7 @@ async function doShare(s, modeOverride) {
     s._share = {url: d.url, provider: d.provider, expires: d.expires, card: d.card, fresh: true};
     copyText(opts.card && d.card ? `${d.card}\n${d.url}` : d.url);
     const bits = ["Link copied · chat"];
-    if (d.n_files) bits.push(`${d.n_files} file${d.n_files > 1 ? "s" : ""}`);
-    if (d.n_images) bits.push(`${d.n_images} image${d.n_images > 1 ? "s" : ""}`);
+    if (d.n_files) bits.push(`${d.n_files} artifact${d.n_files > 1 ? "s" : ""}`);
     toast(bits.join(" · "));
     flashCopied(s.path);
     if (expanded !== s.path) toggle(s);  // reveal the link row
@@ -1183,7 +1181,7 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
-  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".seg span, .tog")) {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".seg span, .tog, .copychip, .morechips, .art")) {
     e.preventDefault(); e.target.click(); return;
   }
   if (mode === "shares") {
@@ -1225,6 +1223,7 @@ document.addEventListener("keydown", (e) => {
     const s = vis[sel];
     if (!s) return;
     const p = peekCache[s.path];
+    if (s._selTouched && !s._sel?.size) return void toast("No files selected");
     const files = s._sel?.size ? [...s._sel]
       : p?.primary?.length ? p.primary
       : [...(s.art_list || []), ...(s.read_list || [])].map((f) => f.path);
