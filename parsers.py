@@ -335,6 +335,7 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
             continue
         out.append({"path": g, "name": os.path.basename(g), "size": st.st_size,
                     "kind": "created", "mtime": st.st_mtime})
+    out.sort(key=lambda a: -a.get("mtime", 0))  # freshest-first even root-less
     if not root:
         return out[:limit]
     seen_rc = {a["path"] for a in out}
@@ -537,6 +538,11 @@ def peek_last_answer(path, clip=480, tail_bytes=16_000_000):
             # bare records (older codex rollouts have no response_item wrapper)
             if obj.get("type") == "message" and obj.get("role") == "assistant":
                 t = _content_text(obj.get("content"))
+                if t.strip():
+                    last = t
+                continue
+            if obj.get("type") == "agent_message":
+                t = _content_text(obj.get("content")) or obj.get("message", "")
                 if t.strip():
                     last = t
                 continue

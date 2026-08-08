@@ -682,6 +682,7 @@ $("#list").addEventListener("click", (ev) => {
     }
     s._sel = s._sel || new Set();
     s._selTouched = true;
+    s._share = null;  // the old link was built for a different file set
     s._sel.has(art.dataset.art) ? s._sel.delete(art.dataset.art) : s._sel.add(art.dataset.art);
     return render();
   }
@@ -690,6 +691,7 @@ $("#list").addEventListener("click", (ev) => {
     const p = peekCache[s.path];
     const all = [...(p?.artifacts || []), ...(p?.reads || [])].map((a) => a.path);
     s._selTouched = true;
+    s._share = null;
     s._sel = (s._sel?.size === all.length) ? new Set() : new Set(all);
     return render();
   }
@@ -840,18 +842,22 @@ function cardHtml(s) {
   return `<div class="card">${peek}${arts || catNote}${link}${resume}</div>`;
 }
 
+async function fetchPeek(s) {
+  try {
+    peekCache[s.path] = await api("/api/peek?path=" + encodeURIComponent(s.path));
+    const pk = peekCache[s.path];
+    if (!s._selTouched && !(s._sel?.size) && pk.primary?.length)
+      s._sel = new Set(pk.primary);
+  }
+  catch { peekCache[s.path] = {messages: [{role: "assistant", text: "unreadable"}], artifacts: []}; }
+}
+
 async function toggle(s) {
   if (!s) return;
   expanded = expanded === s.path ? null : s.path;
   render();
   if (expanded && !peekCache[s.path]) {
-    try {
-      peekCache[s.path] = await api("/api/peek?path=" + encodeURIComponent(s.path));
-      const pk = peekCache[s.path];
-      if (!s._selTouched && !(s._sel?.size) && pk.primary?.length)
-        s._sel = new Set(pk.primary);
-    }
-    catch { peekCache[s.path] = {messages: [{role: "assistant", text: "unreadable"}], artifacts: []}; }
+    await fetchPeek(s);
     if (expanded === s.path) render();
   }
 }
@@ -933,7 +939,7 @@ async function doShare(s, modeOverride) {
   s._share = "busy"; render();
   const gen = optsGen;
   try {
-    const selFiles = (peekCache[s.path] && s._sel?.size) ? [...s._sel] : undefined;
+    const selFiles = (peekCache[s.path] && (s._selTouched || s._sel?.size)) ? [...(s._sel || [])] : undefined;
     const d = await api("/api/share", {path: s.path, redact: opts.redact,
       mode: modeOverride || opts.mode, expires_hours: opts.expiry,
       ...(selFiles ? {files: selFiles} : {})});
@@ -962,6 +968,10 @@ async function refresh() {
       return old && old.mtime === n.mtime ? Object.assign(n, {_share: old._share, _art: old._art, _sel: old._sel, _selTouched: old._selTouched, _chipsOpen: old._chipsOpen}) : n;
     });
     stores = data.stores || [];
+    if (expanded && !peekCache[expanded]) {  // invalidated above — refetch live
+      const cur = sessions.find((x) => x.path === expanded);
+      if (cur) fetchPeek(cur).then(render);
+    }
     render();
   } catch {}
 }
@@ -1162,8 +1172,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();  // otherwise the search input beeps
     const s = vis[sel];
     if (e.altKey) { if (s && openTargetFor(s)) doResume(s); }
-    else if (s && expanded === s.path && s._sel?.size) shareSelectedArtifacts(s);
-    else doShare(s);
+    else doShare(s);  // ⏎ is always session+files; files-only lives on its own button
   }
   else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "c"
            && mode === "list") {

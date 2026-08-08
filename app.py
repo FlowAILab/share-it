@@ -236,19 +236,12 @@ def _artifact_fingerprint(session, opts):
     """Hash of the (path, size, mtime) set a share would include — any deletion,
     addition or edit changes it, so a stale bundle can never be served as cached."""
     import hashlib
-    pool = _session_artifacts(session)
-    if opts.get("mode") == "deep" or opts.get("files") is not None:
-        pool = pool + [r for r in adapters.by_id(session["source"]).reads(
-            session["path"], cwd=session.get("cwd") or None)
-            if not any(a["path"] == r["path"] for a in pool)]
-    chosen = opts.get("files")
+    try:
+        pool = _effective_files(session, opts)
+    except ValueError:
+        pool = []  # the share itself will surface the error
     parts = []
     for a in pool:
-        if chosen is not None:
-            if a["path"] not in set(chosen):
-                continue
-        elif opts.get("mode") != "deep" and a["kind"] != "created":
-            continue
         try:
             st = os.stat(a["path"])
             parts.append(f"{a['path']}:{st.st_size}:{st.st_mtime:.3f}")
@@ -278,41 +271,58 @@ def _session_artifacts(session):
         session["path"], cwd=session.get("cwd") or None)
 
 
-def _artifact_links(session, opts, upload=True):
-    """Share session artifacts (cached per file+expiry) → [{name,size,path,kind,url}].
+def _effective_files(session, opts):
+    """The single source of truth for which files a share carries.
 
-    Default modes ship only files the agent *created*. Deep mode also uploads
-    project files it modified or read (current on-disk state, cwd-contained).
-    """
-    if not opts.get("artifacts"):
-        return []
-    art_opts = {"expires_hours": opts["expires_hours"]}
+    Explicit selection (opts["files"]) wins — oversize picks are an error, not
+    a silent omission. Otherwise: deep = created+modified+read; default modes =
+    the primary deliverable(s), falling back to every created file."""
     arts = _session_artifacts(session)
     chosen = opts.get("files")
-    if chosen is not None:  # explicit selection wins over mode defaults
+    if chosen is not None:
         pool = arts + [{**r, "kind": "referenced"}
                        for r in adapters.by_id(session["source"]).reads(
                            session["path"], cwd=session.get("cwd") or None)
                        if not any(a["path"] == r["path"] for a in arts)]
         fset = set(chosen)
-        arts = [a for a in pool if a["path"] in fset
-                and a.get("size") is not None and a["size"] <= parsers.ARTIFACT_MAX_BYTES]
-    elif opts.get("mode") == "deep":
+        picked = [a for a in pool if a["path"] in fset]
+        too_big = [a["name"] for a in picked
+                   if (a.get("size") or 0) > parsers.ARTIFACT_MAX_BYTES]
+        if too_big:
+            raise ValueError(f"too large to share (25MB cap): {', '.join(too_big)}")
+        if sum(a.get("size") or 0 for a in picked) > 100_000_000:
+            raise ValueError("selection exceeds the 100MB bundle cap — drop some files")
+        return picked
+    if opts.get("mode") == "deep":
         arts = arts + [{**r, "kind": "referenced"}
                        for r in adapters.by_id(session["source"]).reads(
                            session["path"], cwd=session.get("cwd") or None)
                        if r.get("size") is not None and r["size"] <= parsers.ARTIFACT_MAX_BYTES
                        and not any(a["path"] == r["path"] for a in arts)]
     else:
-        arts = [a for a in arts if a["kind"] == "created"]
-    budget = 100_000_000  # total bundle cap
+        created = [a for a in arts if a["kind"] == "created"]
+        try:
+            _, last = _peek_texts(session["path"], session["mtime"])
+        except Exception:
+            last = ""
+        prim = set(_primary_paths(created, last))
+        arts = [a for a in created if a["path"] in prim] or created
+    budget = 100_000_000  # total bundle cap — defaults degrade, selections error above
     kept = []
     for a in arts:
         if budget - a["size"] < 0:
             continue
         budget -= a["size"]
         kept.append(a)
-    arts = kept
+    return kept
+
+
+def _artifact_links(session, opts, upload=True):
+    """Share session artifacts (cached per file+expiry) → [{name,size,path,kind,url}]."""
+    if not opts.get("artifacts"):
+        return []
+    art_opts = {"expires_hours": opts["expires_hours"]}
+    arts = _effective_files(session, opts)
 
     def resolve(art):
         entry = share.find_cached(session, art_opts, artifact=art["path"])
@@ -476,7 +486,8 @@ class Handler(BaseHTTPRequestHandler):
                     a["head"] = _text_head(a["path"])
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
-            self._json({"messages": messages, "last": last_answer,
+            shown = last_answer[:480] + ("…" if len(last_answer) > 480 else "")
+            self._json({"messages": messages, "last": shown,
                         "artifacts": artifacts, "reads": reads, "pending": pending,
                         "primary": _primary_paths(artifacts, last_answer)})
         elif route == "/api/search":
@@ -688,7 +699,7 @@ def _peek_texts(path, mtime):
                      if m["role"] == "assistant" and m.get("text", "").strip()), "")
     else:
         msgs = parsers.peek_session(path)
-        last = parsers.peek_last_answer(path)
+        last = parsers.peek_last_answer(path, clip=4000)
     with _lock:
         _peekmem[path] = (mtime, msgs, last)
         if len(_peekmem) > 400:          # bound memory; oldest-inserted first
@@ -704,12 +715,13 @@ _TEMPISH = re.compile(
 
 def _primary_paths(artifacts, last_answer):
     """The deliverable(s) a share should carry by default: files the final
-    answer names, else the freshest meaningful created files. Temp/build noise
-    never wins."""
-    meaningful = [a for a in artifacts if not _TEMPISH.search(a["path"])]
-    named = [a["path"] for a in meaningful if a["name"] in (last_answer or "")]
+    answer explicitly names (even dist/build outputs), else the freshest
+    meaningful created files — temp/build noise never wins by default."""
+    la = last_answer or ""
+    named = [a["path"] for a in artifacts if a["name"] and a["name"] in la]
     if named:
         return named[:3]
+    meaningful = [a for a in artifacts if not _TEMPISH.search(a["path"])]
     created = [a["path"] for a in meaningful if a["kind"] == "created"]
     return created[:3]
 

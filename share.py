@@ -160,12 +160,20 @@ def load_shares():
         return []
 
 
+def _src_mtime(session, artifact=None):
+    """mtime of what was shared; synthetic ids (Cursor db#composer) aren't files."""
+    try:
+        return os.path.getmtime(artifact or session["path"])
+    except OSError:
+        return session.get("mtime", 0)
+
+
 def record_share(session, result, opts, size, artifact=None):
     entry = {
         "url": result["url"], "provider": result["provider"], "ref": result["ref"],
         "title": (os.path.basename(artifact) if artifact else session["title"]),
         "source": session["source"], "path": session["path"], "artifact": artifact,
-        "src_mtime": os.path.getmtime(artifact or session["path"]),
+        "src_mtime": _src_mtime(session, artifact),
         "created": time.time(),
         "expires": None if result["hours"] is None else time.time() + result["hours"] * 3600,
         "req_hours": opts.get("expires_hours", EXPIRES_HOURS),
@@ -186,10 +194,7 @@ def record_share(session, result, opts, size, artifact=None):
 
 def find_cached(session, opts, artifact=None):
     """A live earlier share of the same bytes with the same options."""
-    try:
-        live_mtime = os.path.getmtime(artifact or session["path"])
-    except OSError:
-        return None
+    live_mtime = _src_mtime(session, artifact)
     now = time.time()
     for s in load_shares():
         if (s["path"] == session["path"] and not s["deleted"]
