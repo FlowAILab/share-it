@@ -1,8 +1,7 @@
 <h1 align="center">Share-It</h1>
 
 <p align="center">
-  <b>Get a shareable link to any AI-coding session — in one click.</b><br>
-  <sub>Your whole session, at a URL. Works with Claude Code · Codex · Cursor · Cowork.</sub>
+  <b>Get a shareable link to any AI-coding session — in one click.</b>
 </p>
 
 <p align="center">
@@ -11,8 +10,12 @@
   </a>
   &nbsp;·&nbsp; Drag to Applications, press <b>⌥S</b>. No setup, no account.
 </p>
+
 <p align="center">
-  <sub>First launch: right-click the app → <b>Open</b> (signed builds coming).</sub>
+  <img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-D97757?logo=anthropic&logoColor=white">
+  <img alt="Codex" src="https://img.shields.io/badge/Codex-000000?logo=openai&logoColor=white">
+  <img alt="Cursor" src="https://img.shields.io/badge/Cursor-000000?logo=cursor&logoColor=white">
+  <img alt="Cowork" src="https://img.shields.io/badge/Cowork-D97757?logo=anthropic&logoColor=white">
 </p>
 
 <p align="center"><sub>▶ demo video coming soon</sub></p>
