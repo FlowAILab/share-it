@@ -59,6 +59,14 @@ def _annotate_one(path, source, cwd, mtime):
         reads_all = parsers.session_reads(path, source=source, cwd=cwd or None, limit=12)
     except Exception:
         reads_all = []  # artifacts already succeeded — keep them
+    n_msgs = n_images = 0
+    try:
+        msgs = adapters.by_id(source).parse(path)
+        n_msgs = sum(1 for m in msgs if m["role"] in ("user", "assistant")
+                     and ((m.get("text") or "").strip() or m.get("media")))
+        n_images = sum(1 for m in msgs for _x in (m.get("media") or []))
+    except Exception:
+        pass
     have = {a["path"] for a in arts}
     # fingerprint the file SET (path+size+mtime) so deletions/edits invalidate shares
     def fp(f):
@@ -68,6 +76,7 @@ def _annotate_one(path, source, cwd, mtime):
         except OSError:
             return [f["path"], None, None]
     rec = {"mtime": mtime, "v": ANNOT_VERSION, "cwd": cwd or "",
+           "n_msgs": n_msgs, "n_images": n_images,
            "arts": sum(1 for a in arts if a["kind"] == "created"),
            "art_list": arts[:24],
            "read_list": [r for r in reads_all if r["path"] not in have],
@@ -82,6 +91,8 @@ def _annotate_one(path, source, cwd, mtime):
 
 def _apply_annot(ent, rec):
     ent["arts"] = rec["arts"]
+    ent["n_msgs"] = rec.get("n_msgs", 0)
+    ent["n_images"] = rec.get("n_images", 0)
     ent["art_list"] = rec["art_list"]
     ent["read_list"] = rec["read_list"]
     ent["annot_v"] = rec["v"]
@@ -256,7 +267,7 @@ def _artifact_fingerprint(session, opts):
     return hashlib.sha256("\n".join(sorted(parts)).encode()).hexdigest()[:16]
 
 
-ANNOT_VERSION = 4  # +fingerprint set
+ANNOT_VERSION = 5  # +n_msgs/n_images counts
 
 
 def _known_files(session):
@@ -430,7 +441,8 @@ def _render_index(session, messages, opts, artifact_links, stats, reads, media_b
             tool_output_limit=10000 if deep else 2000,
             tool_input_limit=4000 if deep else 800,
             artifact_links=links or None, card=card,
-            mode_label=opts["mode"], expiry_label=expiry_label)
+            mode_label=opts["mode"], expiry_label=expiry_label,
+            media_base=media_base)
     last_request = next((m["text"] for m in reversed(messages)
                          if m["role"] == "user" and m["text"].strip()), "")
     return render.render_markdown(
@@ -718,72 +730,33 @@ class Handler(BaseHTTPRequestHandler):
                                "provider": entry["provider"], "expires": entry["expires"],
                                "n_files": len(shared_paths), "n_images": len(media_objs)})
         if route == "/api/copy_chat":
-            # human → one rich pasteboard item (html w/ data-URI images).
-            # agent/deep → a FILE bundle (session.md + images + artifacts):
-            # Chromium apps read only the first pasteboard item, and agent
-            # composers attach pasted files natively — files ARE the handoff.
+            # ⌘C copies THE CHAT — identical in every mode, never a network
+            # call. ONE pasteboard item: plain = full markdown, html/rtf carry
+            # the images inline. Links are what the share modes are for.
             path = body.get("path", "")
             if not _allowed(path):
                 return self._json({"error": "invalid path"}, 400)
             opts = _render_opts(body)
             try:
-                import shutil
-                import time as _t
                 import media as _media
                 session = _session_entry(path)
                 adapter = adapters.by_id(session["source"])
                 messages = adapter.parse(path)
-                files = _effective_files(session, opts) if opts.get("artifacts") else []
-                media_objs = _media.collect(messages)
+                media_objs = _media.collect(messages)   # annotates names for token cleanup
                 n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
                              and ((m.get("text") or "").strip() or m.get("media")))
+                html = render.clipboard_html(session, messages,
+                                             include_tools=False,
+                                             include_thinking=False,
+                                             redact_secrets=opts["redact"])
                 stats = parsers.session_stats(path, messages)
-                deep = opts["mode"] == "deep"
-                t_in, t_out = (4000, 10000) if deep else (500, 1200)
-                if opts["mode"] == "human":
-                    html = render.clipboard_html(session, messages,
-                                                 include_tools=False,
-                                                 include_thinking=False,
-                                                 redact_secrets=opts["redact"],
-                                                 tool_input_limit=t_in,
-                                                 tool_output_limit=t_out)
-                    md = render.render_markdown(
-                        session, messages, redact_secrets=opts["redact"],
-                        include_thinking=False, messages_only=True,
-                        tool_input_limit=t_in, tool_output_limit=t_out,
-                        stats=stats, mode="human",
-                        cwd=session.get("cwd") or None)
-                    return self._json({"kind": "rich", "html": html, "markdown": md,
-                                       "messages": n_msgs, "images": len(media_objs),
-                                       "files": [a["path"] for a in files
-                                                 if os.path.isfile(a["path"])]})
-                # agent/deep: file bundle
-                exp_dir = os.path.join(os.path.expanduser("~/.shareit/exports"),
-                                       f"chat-{int(_t.time())}")
-                os.makedirs(exp_dir, exist_ok=True)
-                for m in media_objs:
-                    with open(os.path.join(exp_dir, m["name"]), "wb") as fh:
-                        fh.write(m["data"])
-                reads = adapter.reads(path, cwd=session.get("cwd") or None) if deep else []
-                last_request = next((m["text"] for m in reversed(messages)
-                                     if m["role"] == "user" and m["text"].strip()), "")
                 md = render.render_markdown(
                     session, messages, redact_secrets=opts["redact"],
-                    include_thinking=opts["thinking"],
-                    messages_only=opts["messages_only"],
-                    tool_input_limit=t_in, tool_output_limit=t_out,
-                    stats=stats, mode=opts["mode"], last_request=last_request,
-                    cwd=session.get("cwd") or None, media_base=".",
-                    read_files=reads or None)
-                md_path = os.path.join(exp_dir, "session.md")
-                with open(md_path, "w") as fh:
-                    fh.write(md)
-                bundle = [md_path] + [os.path.join(exp_dir, m["name"]) for m in media_objs]
-                bundle += [a["path"] for a in files if os.path.isfile(a["path"])]
-                return self._json({"kind": "files", "files": bundle,
-                                   "messages": n_msgs, "images": len(media_objs),
-                                   "artifacts": sum(1 for a in files
-                                                    if os.path.isfile(a["path"]))})
+                    include_thinking=False, messages_only=True,
+                    stats=stats, mode="human",
+                    cwd=session.get("cwd") or None)
+                return self._json({"kind": "rich", "html": html, "markdown": md,
+                                   "messages": n_msgs, "images": len(media_objs)})
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
         if route in ("/api/file/copy", "/api/file/reveal", "/api/file/open", "/api/file/preview"):

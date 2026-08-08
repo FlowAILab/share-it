@@ -216,14 +216,16 @@ def _strip_image_token(text, msg):
     return text
 
 
-def _media_html(msg, inline=True):
-    """<img> tags for a message's images — relative names resolve inside the
-    bundle (/b/<id>/mN.png), so the reader page needs no absolute URLs."""
-    if not inline:
+def _media_html(msg, media_base=None):
+    """<img> tags for a message's images. ABSOLUTE urls: the reader lives at
+    /b/<id> (no trailing slash), so relative names would resolve to /b/mN.png
+    — a sibling of the bundle — and 404. Learned the hard way."""
+    if media_base is None:
         return ""
     imgs = [m["name"] for m in msg.get("media") or [] if m.get("name")]
-    return "".join(f'<img class="pasted" src="{_esc(n)}" alt="pasted image" loading="lazy">'
-                   for n in imgs)
+    return "".join(
+        f'<img class="pasted" src="{_esc(media_base)}/{_esc(n)}" alt="pasted image" loading="lazy">'
+        for n in imgs)
 
 
 def _esc(text):
@@ -353,7 +355,7 @@ footer { max-width:46rem; margin:48px auto 0; color:var(--dim); font-size:0.76re
 def render_html(session, messages, redact_secrets=True, include_thinking=False,
                 messages_only=False, artifact_links=None, read_files=None, card="",
                 tool_output_limit=2000, tool_input_limit=800,
-                mode_label="human", expiry_label="", with_media=True):
+                mode_label="human", expiry_label="", media_base=None):
     """Reader page: the conversation as a chat, agent work folded between turns."""
     src_label = "Claude Code" if session["source"] == "claude" else "Codex"
     logo = _LOGOS["claude" if session["source"] == "claude" else "codex"]
@@ -389,15 +391,15 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
             if not (msg.get("text") or "").strip():
                 continue
             flush_steps()
-            parts.append(f'<div class="turn you"><div class="body">{_esc(clean(_strip_image_token(msg["text"], msg) if with_media else msg["text"]))}'
-                         f'{_media_html(msg, with_media)}</div></div>')
+            parts.append(f'<div class="turn you"><div class="body">{_esc(clean(_strip_image_token(msg["text"], msg) if media_base else msg["text"]))}'
+                         f'{_media_html(msg, media_base)}</div></div>')
         elif role == "assistant":
             if not (msg.get("text") or "").strip():
                 continue
             flush_steps()
             parts.append(f'<div class="turn" id="turn-{len(parts)}"><div class="av">{logo}</div>'
                          f'<div class="body md">{_md_to_html(clean(msg["text"]))}'
-                         f'{_media_html(msg, with_media)}</div></div>')
+                         f'{_media_html(msg, media_base)}</div></div>')
         elif role == "thinking":
             if not (msg.get("text") or "").strip():
                 continue  # empty thinking renders as a dead panel — drop it

@@ -392,10 +392,19 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
     if not root:
         return out[:limit]
     seen_rc = {a["path"] for a in out}
+    home = os.path.realpath(os.path.expanduser("~")) + os.sep
     resolved = {}  # realpath → kind; "created" wins over "modified" across path spellings
     for c, kind in found.items():
         rc = os.path.realpath(c if os.path.isabs(c) else os.path.join(cwd, c))
-        if not rc.startswith(root) or rc in seen_rc:
+        # CREATED files count wherever they live (the agent verifiably made
+        # them) as long as they're the user's own; modified stay root-contained
+        contained = rc.startswith(root)
+        if not contained and not (kind == "created" and rc.startswith(home)
+                                  and "/Library/" not in rc and ".app/" not in rc
+                                  and "/Applications/" not in rc
+                                  and "/." not in rc[len(home) - 1:]):
+            continue
+        if rc in seen_rc:
             continue
         if kind == "created" or rc not in resolved:
             resolved[rc] = kind
