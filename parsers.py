@@ -56,8 +56,13 @@ _INJECTED_RE = re.compile(
     r"[a-z][a-z0-9_-]*(?:_context|_notification|_instructions|_manifest|_reminder))\b")
 
 
+_CODEX_BOILERPLATE = re.compile(r"^\s*#+\s*Files mentioned by the user\b", re.I)
+_TEMP_ATTACH = re.compile(r"/(?:private/)?var/folders/\S*")
+
+
 def _is_injected(text):
-    return bool(_INJECTED_RE.match(text or ""))
+    t = text or ""
+    return bool(_INJECTED_RE.match(t) or _CODEX_BOILERPLATE.match(t.lstrip()))
 
 
 _CODEX_CONTEXT_PREFIXES = ("<",)  # legacy alias; real check is _is_injected
@@ -76,7 +81,7 @@ def _content_text(content):
             parts.append(block.get("text", ""))
         elif t == "input_image":
             parts.append("[image]")
-    return _ANSI.sub("", "\n".join(p for p in parts if p))
+    return _TEMP_ATTACH.sub("[attachment]", _ANSI.sub("", "\n".join(p for p in parts if p)))
 
 
 def _iter_jsonl(path):
@@ -222,7 +227,9 @@ def parse_codex(path):
             ) if m]
             if role == "user":
                 stripped = text.lstrip()
-                if (stripped and not _is_injected(stripped)) or media:
+                if _is_injected(stripped):
+                    text = ""   # boilerplate/injected — keep the image, drop the text
+                if (text.strip()) or media:
                     msg = {"role": "user", "text": text}
                     if media:
                         msg["media"] = media
