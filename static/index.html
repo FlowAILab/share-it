@@ -322,9 +322,9 @@ function menuItemsFor(s) {
   const payload = nSelM === 1 ? base(selPaths[0]) : `${nSelM} files`;
   const items = [
     {hdr: "Share link"},
-    {t: "For an Agent — handoff", k: "⏎", run: () => doShare(s, "agent")},
-    {t: "For a Teammate — reader page", run: () => doShare(s, "human")},
-    {t: "Deep — adds reasoning", run: () => {
+    {t: "Agent handoff", k: "⏎", run: () => doShare(s, "agent")},
+    {t: "Reader page", run: () => doShare(s, "human")},
+    {t: "Deep (reasoning)", run: () => {
       if (!localStorage.getItem("shareit-deep-warned")) {
         localStorage.setItem("shareit-deep-warned", "1");
         toast("Deep adds reasoning and detailed tool output — review before sending.");
@@ -332,17 +332,15 @@ function menuItemsFor(s) {
       doShare(s, "deep");
     }},
     {hdr: "Copy"},
-    {t: "Chat — pastes anywhere", k: "⌘C", run: () => copyChat(s)},
+    {t: "Chat", k: "⌘C", run: () => copyChat(s)},
+    {t: "Last Answer", run: () => copyLastAnswer(s)},
   ];
   if (nf) items.push({t: `Files (${payload})`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
-  items.push({t: "Last Answer", sub: [
-    {t: "Full Answer", run: () => copyLastAnswer(s)},
-    {t: "Last Code Block", run: () => copyLastCode(s)},
-  ]});
   items.push({t: "Copy as…", sub: [
     {t: "Markdown file (.md)", run: () => copySession(s, "agent", [])},
     {t: "Web page (.html)", run: () => copySession(s, "human", [])},
-    {t: `Bundle — chat + ${nf || "no"} file${nf === 1 ? "" : "s"}`, run: () => copySession(s, null, fp)},
+    {t: `Bundle (chat + ${nf || 0} file${nf === 1 ? "" : "s"})`, run: () => copySession(s, null, fp)},
+    {t: "Last code block only", run: () => copyLastCode(s)},
   ]});
   if (nf && nSelM < nf) items.push({t: `Choose Files… (${nf} total)`, run: () => {
     if (expanded !== s.path) toggle(s);

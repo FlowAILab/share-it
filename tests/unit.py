@@ -235,6 +235,56 @@ def main():
     finally:
         parsers._codex_generated_images = real_gen
 
+    # ---- payload v3: media, clipboard html safety, selection ----
+    import base64 as _b64
+    import media as _mediamod
+    png_meta = (b"\x89PNG\r\n\x1a\n"
+                + b"\x00\x00\x00\x04tEXtabcd\x00\x00\x00\x00"
+                + b"\x00\x00\x00\x00IEND\xaeB`\x82")
+    img_lines = [
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+             "data": _b64.b64encode(png_meta).decode()}},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+             "data": _b64.b64encode(png_meta).decode()}},   # duplicate → deduped
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+             "data": ""}},                                   # empty → tolerated
+        ]}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "see screenshot"}]}},
+    ]
+    mp = fixture(tmp, "media.jsonl", img_lines)
+    msgs = parsers.parse_claude(mp)
+    objs = _mediamod.collect(msgs)
+    check("inline images survive parsing + dedupe", len(objs) == 1, str(len(objs)))
+    check("metadata stripped from collected image",
+          objs and b"tEXt" not in objs[0]["data"])
+    names = [m.get("name") for msg in msgs for m in msg.get("media", [])]
+    check("duplicate image reuses one object name", len(set(names)) == 1, str(names))
+
+    codex_img = [
+        {"type": "response_item", "payload": {"type": "message", "role": "user",
+         "content": [{"type": "input_text",
+                      "text": '<image src="/Users/someone/secret/shot.png"></image> look'},
+                     {"type": "input_image",
+                      "image_url": "data:image/png;base64," + _b64.b64encode(png_meta).decode()}]}},
+        {"type": "response_item", "payload": {"type": "agent_message", "message": "ok"}},
+    ]
+    cxp = fixture(tmp, "codeximg.jsonl", codex_img)
+    cmsgs = parsers.parse_codex(cxp)
+    utext = next(m["text"] for m in cmsgs if m["role"] == "user")
+    check("codex local-path image markers stripped", "/Users/someone" not in utext, utext)
+    check("codex inline image collected",
+          any(m.get("media") for m in cmsgs))
+
+    xss = [{"role": "user", "text": '<script>alert(1)</script> & "quotes"'},
+           {"role": "assistant", "text": "<img src=x onerror=alert(2)>"}]
+    html_out = render.clipboard_html({"title": "<b>t</b>", "source": "claude"}, xss)
+    check("clipboard html escapes all user content",
+          "<script" not in html_out and "<img" not in html_out
+          and "&lt;script&gt;" in html_out)
+    check("clipboard html styles are inline-only", "<style" not in html_out)
+
     print()
     if FAIL:
         print(f"{len(FAIL)} FAILURES: {FAIL}")
