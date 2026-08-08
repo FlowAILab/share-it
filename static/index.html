@@ -890,6 +890,12 @@ async function copyLastAnswer(s) {
   try {
     const d = await api("/api/last_answer?path=" + encodeURIComponent(s.path));
     if (!d.answer) return toast("No assistant answer found");
+    if (d.html && nativeCmd("copyRich", d.files || [], {html: d.html, markdown: d.answer, images: []})) {
+      const bits = ["Answer copied"];
+      if (d.files?.length) bits.push(`${d.files.length} file${d.files.length > 1 ? "s" : ""}`);
+      if (d.code_blocks?.length) bits.push(`${d.code_blocks.length} code block${d.code_blocks.length > 1 ? "s" : ""} inside`);
+      return toast(bits.join(" · "));
+    }
     await copyText(d.answer);
     toast(d.code_blocks.length
       ? `Answer copied (${d.code_blocks.length} code block${d.code_blocks.length > 1 ? "s" : ""} inside)`

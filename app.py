@@ -597,11 +597,23 @@ class Handler(BaseHTTPRequestHandler):
                 messages = adapters.by_id(_session_entry(path)["source"]).parse(path)
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
-            answer = next((m["text"] for m in reversed(messages)
-                           if m["role"] == "assistant" and m["text"].strip()), "")
-            import re as _re
-            blocks = _re.findall(r"```[a-zA-Z]*\n(.*?)```", answer, _re.S)
-            self._json({"answer": answer, "code_blocks": blocks})
+            last_msg = next((m for m in reversed(messages)
+                             if m["role"] == "assistant" and m["text"].strip()), None)
+            answer = last_msg["text"] if last_msg else ""
+            blocks = re.findall(r"```[a-zA-Z]*\n(.*?)```", answer, re.S)
+            # rich flavor + the files this answer explicitly names
+            session = _session_entry(path)
+            html = render.clipboard_html(session, [last_msg] if last_msg else [],
+                                         include_tools=False)
+            mentioned = []
+            try:
+                for a in _session_artifacts(session):
+                    if a["name"] and a["name"] in answer and os.path.isfile(a["path"]):
+                        mentioned.append(a["path"])
+            except Exception:
+                pass
+            self._json({"answer": answer, "code_blocks": blocks,
+                        "html": html, "files": mentioned[:5]})
         elif route == "/api/shares":
             self._json({"shares": share.load_shares()})
         else:
