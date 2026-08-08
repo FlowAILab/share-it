@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-D97757?logo=anthropic&logoColor=white">
-  <img alt="Codex" src="https://img.shields.io/badge/Codex-000000?logo=openai&logoColor=white">
+  <img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-D97757?logo=claude&logoColor=white">
+  <img alt="Codex" src="https://img.shields.io/badge/Codex-412991">
   <img alt="Cursor" src="https://img.shields.io/badge/Cursor-000000?logo=cursor&logoColor=white">
   <img alt="Cowork" src="https://img.shields.io/badge/Cowork-D97757?logo=anthropic&logoColor=white">
 </p>
@@ -22,16 +22,17 @@
 
 ---
 
-Hit **⌥S**, find your session, done. The link carries the **whole thing** — the
-conversation and every file it made. Send it to a friend, or drop it into another
-agent and it picks up right where you left off. 🚀
+Share-It indexes every **AI agent session** on your Mac — Claude Code, Codex, Cursor,
+Cowork — in one fast, local search. Find any chat and turn it into a shareable link in a
+single keystroke: the full conversation **and** the files the agent built. Send it to a
+teammate, or hand it to another agent to continue the work. 🚀
 
 ## Core
 
 - 🔗 **Share a link** — hit **⏎**, a short URL is on your clipboard.
 - 📋 **Copy the session** — hit **⌘C**, the full chat as a file. Stays on your machine.
-- 📦 **Grab the files** — the PDFs, images, and code it made, ready to drop into Finder,
-  Slack, or email. Real files, not screenshots.
+- 📦 **Grab the files** — the PDFs, images, and code the agent made, ready to drop into
+  Finder, Slack, or email. Real files, not screenshots.
 
 ## Nice extras
 
