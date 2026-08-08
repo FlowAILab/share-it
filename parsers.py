@@ -330,7 +330,8 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
     Containment: only files under the session's cwd (when known) are offered —
     a stray write elsewhere on disk is not a shareable "artifact".
     """
-    found = {}  # path → kind ("created" beats "modified")
+    found = {}     # path → kind ("created" beats "modified")
+    declared = {}  # realpath → True: files the session formally published
     real = os.path.realpath(path)
     is_claude = (source == "claude" if source
                  else real.startswith(os.path.realpath(CLAUDE_ROOT) + os.sep))
@@ -341,6 +342,16 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
         if m["role"] != "tool":
             continue
         candidates = []
+        if is_claude and m["name"] == "Artifact" and m.get("ok"):
+            # OFFICIALLY DECLARED artifact — the session published this file.
+            # Highest rank, containment-exempt (scratchpads live outside cwd).
+            try:
+                fp = json.loads(m["input"]).get("file_path")
+            except (json.JSONDecodeError, AttributeError):
+                fp = None
+            if fp:
+                declared[os.path.realpath(fp)] = True
+            continue
         if is_claude and m["name"] in _WRITE_TOOLS:
             if not m.get("ok"):  # denied or failed writes are not artifacts
                 continue
@@ -378,9 +389,16 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
                 continue
             found[c] = "created" if kind == "created" or found.get(c) == "created" else kind
     gen_images = [] if is_claude else _codex_generated_images(real)
-    if not root and not gen_images:
+    if not root and not gen_images and not declared:
         return []  # unknown project root → no safe containment → no auto-artifacts
     out = []
+    for d in declared:  # formally published — always first, wherever they live
+        try:
+            st = os.stat(d)
+        except OSError:
+            continue
+        out.append({"path": d, "name": os.path.basename(d), "size": st.st_size,
+                    "kind": "created", "declared": True, "mtime": st.st_mtime})
     for g in gen_images:  # our own store — containment-exempt, always created
         try:
             st = os.stat(g)

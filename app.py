@@ -60,11 +60,14 @@ def _annotate_one(path, source, cwd, mtime):
     except Exception:
         reads_all = []  # artifacts already succeeded — keep them
     n_msgs = n_images = 0
+    last_text = ""
     try:
         msgs = adapters.by_id(source).parse(path)
         n_msgs = sum(1 for m in msgs if m["role"] in ("user", "assistant")
                      and ((m.get("text") or "").strip() or m.get("media")))
         n_images = sum(1 for m in msgs for _x in (m.get("media") or []))
+        last_text = next((m["text"] for m in reversed(msgs)
+                          if m["role"] == "assistant" and (m.get("text") or "").strip()), "")
     except Exception:
         pass
     have = {a["path"] for a in arts}
@@ -77,6 +80,7 @@ def _annotate_one(path, source, cwd, mtime):
             return [f["path"], None, None]
     rec = {"mtime": mtime, "v": ANNOT_VERSION, "cwd": cwd or "",
            "n_msgs": n_msgs, "n_images": n_images,
+           "n_primary": len(_primary_paths(arts, last_text[:4000])),
            "arts": sum(1 for a in arts if a["kind"] == "created"),
            "art_list": arts[:24],
            "read_list": [r for r in reads_all if r["path"] not in have],
@@ -91,6 +95,7 @@ def _annotate_one(path, source, cwd, mtime):
 
 def _apply_annot(ent, rec):
     ent["arts"] = rec["arts"]
+    ent["n_primary"] = rec.get("n_primary", 0)
     ent["n_msgs"] = rec.get("n_msgs", 0)
     ent["n_images"] = rec.get("n_images", 0)
     ent["art_list"] = rec["art_list"]
@@ -267,7 +272,7 @@ def _artifact_fingerprint(session, opts):
     return hashlib.sha256("\n".join(sorted(parts)).encode()).hexdigest()[:16]
 
 
-ANNOT_VERSION = 5  # +n_msgs/n_images counts
+ANNOT_VERSION = 6  # +n_primary (payload-honest badge)
 
 
 def _known_files(session):
@@ -906,9 +911,11 @@ def _primary_paths(artifacts, last_answer):
     answer explicitly names (even dist/build outputs), else the freshest
     meaningful created files — temp/build noise never wins by default."""
     la = last_answer or ""
-    named = [a["path"] for a in artifacts if a["name"] and a["name"] in la]
-    if named:
-        return named[:3]
+    declared = [a["path"] for a in artifacts if a.get("declared")]
+    named = [a["path"] for a in artifacts
+             if a["name"] and a["name"] in la and a["path"] not in declared]
+    if declared or named:
+        return (declared + named)[:5]
     meaningful = [a for a in artifacts if not _TEMPISH.search(a["path"])]
     created = [a["path"] for a in meaningful if a["kind"] == "created"]
     return created[:3]

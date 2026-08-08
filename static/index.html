@@ -652,7 +652,7 @@ function renderList() {
         <span class="glyph" title="${esc(s.app)}">${GLYPHS[s.app] || ""}</span>
         <span class="t">${hiText(s.title)}${s._snippet && $("#q").value.trim().length >= 2
           ? `<span class="snip">${esc(s._snippet).replace(/«/g, "<b>").replace(/»/g, "</b>")}</span>` : ""}</span>
-        ${s.arts ? `<span class="clip" title="${s.arts} file${s.arts > 1 ? "s" : ""} created — shared along with the session"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.arts}</span>` : ""}
+        ${(s.n_primary ?? s.arts) ? `<span class="clip" title="${s.n_primary ?? s.arts} deliverable${(s.n_primary ?? s.arts) > 1 ? "s" : ""} ship with a share (${s.arts} file${s.arts > 1 ? "s" : ""} total available)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.n_primary ?? s.arts}</span>` : ""}
         <span class="m">${esc(s.project || "")}&ensp;<span title="last used ${rel(s.last_used || s.mtime)} ago">${rel(s.last_used || s.mtime)}</span></span>
         ${shareBtnHtml(s)}
         <button class="iconbtn dots" data-menu="1" aria-label="actions">•••</button>
@@ -881,10 +881,13 @@ function cardHtml(s) {
     ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⇧⌘C</kbd></button>
       <button class="share small" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"}</button>` : ""}
   </div>` : "";
+  const nPrim = prim.size || s.n_primary || 0;
   const truth = (s.n_msgs || s.n_images || nAll)
     ? `<div class="paysum">${[s.n_msgs ? `${s.n_msgs} messages` : null,
         s.n_images ? `${s.n_images} image${s.n_images > 1 ? "s" : ""}` : null,
-        nAll ? `${nAll} file${nAll > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ")}</div>` : "";
+        nPrim ? `${nPrim} artifact${nPrim > 1 ? "s" : ""}` : null,
+        nAll > nPrim ? `+${nAll - nPrim} other file${nAll - nPrim > 1 ? "s" : ""}` : null
+      ].filter(Boolean).join(" · ")}</div>` : "";
   const openTarget = openTargetFor(s);
   const resume = `<div class="ctl">${openTarget ? `<button class="actbtn" id="resume"
     title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</button>` : ""}

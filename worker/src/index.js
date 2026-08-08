@@ -138,7 +138,7 @@ export default {
     }
 
     // ---------- bundle read/delete plane ----------
-    m = path.match(/^\/b\/([A-Za-z0-9_-]{16,32})(?:\/([A-Za-z0-9._-]{1,80}))?$/);
+    m = path.match(/^\/b\/([A-Za-z0-9_-]{16,32})(?:\/([A-Za-z0-9._-]{1,80})?)?$/);  // tolerate trailing slash
     if (m) {
       const [, id, name] = m;
       if (req.method === "DELETE" && !name) {
