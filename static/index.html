@@ -156,6 +156,7 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .resume:hover { color: var(--ink); }
 .openin { display: inline-flex; align-items: center; gap: 5px; }
 .morechips { font-size: 11px; color: var(--faint); align-self: center; }
+.row.pending-del { opacity: 0.5; }
 .paysum { font-size: 11px; color: var(--faint); padding: 2px 0 0; }
 .mhdr { font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
   color: var(--faint); padding: 7px 12px 3px; }
@@ -511,8 +512,12 @@ function optsChanged() {  // options affect what a share contains — drop per-r
   saveOpts(); renderOpts(); render();
 }
 
+const TOKEN = window.__SHAREIT_TOKEN || "";
 async function api(path, body) {
-  const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : undefined);
+  const hdrs = {"X-Shareit-Token": TOKEN};
+  if (body) hdrs["Content-Type"] = "application/json";
+  const r = await fetch(path, {method: body ? "POST" : "GET", headers: hdrs,
+    ...(body ? {body: JSON.stringify(body)} : {})});
   const d = await r.json();
   if (!r.ok) throw new Error(d.error || r.statusText);
   return d;
@@ -899,7 +904,7 @@ function cardHtml(s) {
     <div class="linkrow"><span class="share-meta" title="link to the whole session">${linkGlyph} session</span>
       <input readonly value="${esc(st.url)}" id="lnk"${st.fresh ? ' data-fresh="1"' : ""}>
       ${expiryLabel(st)}<button class="iconbtn" data-copy="${esc(opts.card && st.card ? st.card + "\n" + st.url : st.url)}">copy</button>
-      ${opts.mode !== "human" ? `<button class="iconbtn" data-agentcopy="${esc(st.url)}" title="copy an instruction + link for another agent">for agent</button>` : ""}
+      ${st.mode !== "human" ? `<button class="iconbtn" data-agentcopy="${esc(st.url)}" title="copy an instruction + link for another agent">for agent</button>` : ""}
       <button class="iconbtn" data-open="${esc(st.url)}">open</button></div>` : "";
   return `<div class="card">${peek}${arts || catNote}${truth}${link}${resume}</div>`;
 }
@@ -1005,7 +1010,9 @@ async function doShareArtifact(s, file) {
 
 async function doShare(s, modeOverride) {
   if (!s || s._share === "busy") return;
-  if (s._share?.url && !modeOverride) {
+  const wantMode = modeOverride || opts.mode;
+  // #9: a cached link is only reusable if it was built for THIS mode + files
+  if (s._share?.url && !modeOverride && s._share.mode === wantMode && !s._selTouched) {
     copyText(s._share.url);
     const n = s._share.n_files;
     toast(`Copied chat link${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
@@ -1014,13 +1021,14 @@ async function doShare(s, modeOverride) {
   s._share = "busy"; render();
   const gen = optsGen;
   try {
-    const selFiles = peekCache[s.path] ? [...(s._sel || [])] : undefined;
+    // #8: only override mode defaults when the user actually picked files
+    const selFiles = (peekCache[s.path] && s._selTouched) ? [...(s._sel || [])] : undefined;
     const d = await api("/api/share", {path: s.path, redact: opts.redact,
       mode: modeOverride || opts.mode, expires_hours: opts.expiry,
       ...(selFiles ? {files: selFiles} : {})});
     if (gen !== optsGen) { s._share = null; render(); return; }  // options changed mid-flight
     s._share = {url: d.url, provider: d.provider, expires: d.expires, card: d.card,
-                n_files: d.n_files || 0, fresh: true};
+                n_files: d.n_files || 0, mode: wantMode, fresh: true};
     copyText(opts.card && d.card ? `${d.card}\n${d.url}` : d.url);
     toast(`Copied chat link${d.n_files ? ` · ${d.n_files} file${d.n_files > 1 ? "s" : ""}` : ""}`);
     flashCopied(s.path);
@@ -1072,18 +1080,8 @@ function renderShares() {
   if (sel >= live.length) sel = Math.max(0, live.length - 1);
   const nGone = shares.length - shares.filter((s) => !s.deleted
     && (s.expires == null || s.expires - Date.now()/1000 > 0)).length;
-  // group artifact links under their parent session share
-  const groups = [];
-  const byPath = {};
-  for (const s of live) {
-    if (s.artifact) {
-      const g = byPath[s.path];
-      if (g) { g.files.push(s); continue; }
-    }
-    const g = {head: s, files: [], path: s.path};
-    if (s.artifact) g.files.push(s);
-    groups.push(g); byPath[s.path] = g;
-  }
+  // one row per live link — selection index == render index, and every link
+  // (including per-file artifact links) is individually visible + deletable
   const expLabel = (s) => {
     if (s.expires == null) return "no expiry";
     const d = (s.expires - Date.now()/1000) / 86400;
@@ -1091,24 +1089,25 @@ function renderShares() {
     if (d < 1.5) return "expires tomorrow";
     return "expires in " + Math.round(d) + "d";
   };
-  list.innerHTML = groups.length ? groups.map((g, i) => {
-    const s = g.head;
+  list.innerHTML = live.length ? live.map((s, i) => {
     const canDelete = s.provider === "hosted";
-    const nf = g.files.length + (s.artifact ? 0 : 0);
+    const pending = !!pendingDeletes[s.url];
     const meta = `${s.artifact ? "file" : ({msgs:"human",full:"agent",chat:"human"}[s.mode]||s.mode||"chat")}`
-      + `${g.files.length && !s.artifact ? " · " + g.files.length + " files" : ""} · ${expLabel(s)}`
-      + (s.redacted ? "" : " · RAW") + (s.provider !== "hosted" ? " · legacy" : "");
-    return `<div class="row${i === sel ? " sel" : ""}" data-i="${i}">
+      + ` · ${expLabel(s)}` + (s.redacted ? "" : " · RAW") + (s.provider !== "hosted" ? " · legacy" : "");
+    const del = pending
+      ? `<button class="iconbtn" data-undo="${esc(s.url)}" aria-label="keep link">undo</button>`
+      : canDelete ? `<button class="iconbtn" data-del="${esc(s.url)}" aria-label="delete link">delete</button>`
+      : `<button class="iconbtn" disabled title="legacy backend — expires on its own">·</button>`;
+    return `<div class="row${i === sel ? " sel" : ""}${pending ? " pending-del" : ""}" data-i="${i}">
       <div class="row-line">
         <span class="t"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a></span>
         <span class="share-meta">${meta}</span>
         <button class="iconbtn" data-copy="${esc(s.url)}" aria-label="copy link">copy</button>
         <button class="iconbtn" data-openlink="${esc(s.url)}">open</button>
-        ${canDelete ? `<button class="iconbtn" data-del="${esc(s.url)}" aria-label="delete link">delete</button>`
-          : `<button class="iconbtn" disabled title="legacy backend — expires on its own">·</button>`}
+        ${del}
       </div></div>`;
   }).join("") : '<div class="empty">no live links</div>';
-  $("#foot").innerHTML = `<span>${groups.length} live${nGone ? ` · ${nGone} expired hidden` : ""}</span>
+  $("#foot").innerHTML = `<span>${live.length} live${nGone ? ` · ${nGone} expired hidden` : ""}</span>
     <span class="grow"></span><span><kbd>⏎</kbd>/<kbd>⌘C</kbd> copy · <kbd>esc</kbd> back</span>`;
 }
 

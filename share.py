@@ -259,12 +259,15 @@ def _snapshot(paths):
 
 
 def record_share(session, result, opts, size, artifact=None, file_paths=None,
-                 counts=None):
+                 counts=None, src_mtime=None):
     entry = {
         "url": result["url"], "provider": result["provider"], "ref": result["ref"],
         "title": (os.path.basename(artifact) if artifact else session["title"]),
         "source": session["source"], "path": session["path"], "artifact": artifact,
-        "src_mtime": _src_mtime(session, artifact),
+        # mtime CAPTURED BEFORE render — if the transcript grew during upload,
+        # the cache stores the bytes we actually shipped, so a request at the
+        # new mtime misses and re-renders instead of serving stale content
+        "src_mtime": src_mtime if src_mtime is not None else _src_mtime(session, artifact),
         "created": time.time(),
         "expires": None if result["hours"] is None else time.time() + result["hours"] * 3600,
         "req_hours": opts.get("expires_hours", EXPIRES_HOURS),
@@ -286,11 +289,19 @@ def record_share(session, result, opts, size, artifact=None, file_paths=None,
     return entry
 
 
+def _write_shares(shares):
+    with _LOCK:
+        _state_file_write(SHARES_PATH, json.dumps(shares, indent=1))
+
+
 def find_cached(session, opts, artifact=None):
     """A live earlier share of the same bytes with the same options."""
     live_mtime = _src_mtime(session, artifact)
     now = time.time()
     for s in load_shares():
+        # export_v gate FIRST — legacy records lack the fields dereferenced below
+        if s.get("export_v") != EXPORT_SCHEMA_VERSION:
+            continue
         if (s["path"] == session["path"] and not s["deleted"]
                 and s.get("artifact") == artifact
                 and s.get("src_mtime") == live_mtime
@@ -301,8 +312,7 @@ def find_cached(session, opts, artifact=None):
                 and s.get("fmt", "md") == opts.get("fmt", "md")
                 and (artifact or s.get("art_mtime", 0) == opts.get("art_mtime", 0))
                 and (artifact or s.get("with_files", True) == bool(opts.get("artifacts", True)))
-                and s.get("export_v") == EXPORT_SCHEMA_VERSION
-                and s["thinking"] == bool(opts.get("thinking"))):
+                and s.get("thinking") == bool(opts.get("thinking"))):
             return s
     return None
 

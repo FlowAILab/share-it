@@ -28,12 +28,14 @@ def fixture(tmp, name, lines):
     return p
 
 
+ART_PATH = "/tmp/shareit-unit-artifact.txt"  # overridden per-run in main()
+
 CLAUDE_LINES = [
     {"type": "user", "message": {"role": "user", "content": "hello world"}},
     {"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "thinking", "thinking": "hmm"},
         {"type": "tool_use", "id": "t1", "name": "Write",
-         "input": {"file_path": "/tmp/shareit-unit-artifact.txt", "content": "x"}},
+         "input": {"file_path": "__ART__", "content": "x"}},
     ]}},
     {"type": "user", "message": {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}},
@@ -61,6 +63,14 @@ CODEX_LINES = [
 
 def main():
     tmp = tempfile.mkdtemp(prefix="shareit-test-")
+    global ART_PATH
+    ART_PATH = os.path.join(tmp, "artifact.txt")
+    import json as _json
+    for _ln in CLAUDE_LINES:
+        _c = (_ln.get("message") or {}).get("content")
+        for _b in _c if isinstance(_c, list) else []:
+            if isinstance(_b, dict) and _b.get("input", {}).get("file_path") == "__ART__":
+                _b["input"]["file_path"] = ART_PATH
     print("== parsers (fixtures) ==")
     cl = fixture(tmp, "claude.jsonl", CLAUDE_LINES)
     msgs = parsers.parse_claude(cl)
@@ -76,13 +86,13 @@ def main():
     check("codex generic *_call kept", any(m["role"] == "tool" and m["name"] == "web_search"
                                            for m in msgs))
 
-    with open("/tmp/shareit-unit-artifact.txt", "w") as fh:
+    with open(ART_PATH, "w") as fh:
         fh.write("artifact")
     try:
         arts = [a["name"] for a in _artifacts(cl)]
-        check("claude artifact found", arts == ["shareit-unit-artifact.txt"], str(arts))
+        check("claude artifact found", arts == ["artifact.txt"], str(arts))
     finally:
-        os.remove("/tmp/shareit-unit-artifact.txt")
+        os.remove(ART_PATH)
 
     # codex: same file via absolute + relative spellings must dedupe, created wins
     with open("/tmp/shareit-dup.pdf", "w") as fh:
@@ -301,7 +311,7 @@ def main():
 
 
 def _artifacts(path):
-    return parsers.session_artifacts(path, source="claude", cwd="/tmp")
+    return parsers.session_artifacts(path, source="claude", cwd=os.path.dirname(ART_PATH))
 
 
 if __name__ == "__main__":

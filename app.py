@@ -21,6 +21,9 @@ import search
 import share
 
 PORT = 8749
+import secrets as _secrets
+TOKEN = _secrets.token_urlsafe(24)   # per-launch; the Swift shell reads it 0600
+TOKEN_PATH = os.path.expanduser("~/.shareit/session_token")
 CACHE_PATH = os.path.expanduser("~/.shareit/index.json")
 ANNOT_PATH = os.path.expanduser("~/.shareit/annotations.json")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -36,8 +39,10 @@ def _load_annot():
     global _annot
     try:
         with open(ANNOT_PATH) as fh:
-            _annot = json.load(fh)
-    except (OSError, json.JSONDecodeError):
+            raw = json.load(fh)
+        _annot = {k: v for k, v in raw.items() if isinstance(v, dict)} \
+                 if isinstance(raw, dict) else {}
+    except (OSError, json.JSONDecodeError, AttributeError):
         _annot = {}
 
 
@@ -123,8 +128,12 @@ def _load_cache():
     global _cache
     try:
         with open(CACHE_PATH) as fh:
-            _cache = json.load(fh)
-    except (OSError, json.JSONDecodeError):
+            raw = json.load(fh)
+        # tolerate a corrupt/legacy shape without crashing the index
+        _cache = {k: v for k, v in raw.items()
+                  if isinstance(v, dict) and "mtime" in v and "source" in v} \
+                 if isinstance(raw, dict) else {}
+    except (OSError, json.JSONDecodeError, AttributeError):
         _cache = {}
 
 
@@ -500,8 +509,9 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _guard(self):
-        """Reject DNS-rebinding / cross-origin requests to this local server."""
+    def _guard(self, need_token=True):
+        """Reject DNS-rebinding / cross-origin requests, and gate /api on the
+        per-launch token so a co-logged-in user can't drive this server."""
         host = (self.headers.get("Host") or "").split(":")[0]
         if host not in ("127.0.0.1", "localhost"):
             self._json({"error": "bad host"}, 403)
@@ -510,6 +520,11 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin not in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"):
             self._json({"error": "bad origin"}, 403)
             return False
+        if need_token:
+            tok = self.headers.get("X-Shareit-Token") or parse_qs(urlparse(self.path).query).get("t", [""])[0]
+            if not _secrets.compare_digest(tok or "", TOKEN):
+                self._json({"error": "unauthorized"}, 401)
+                return False
         return True
 
     def _json(self, obj, code=200):
@@ -552,15 +567,20 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def _route_get(self):
-        if not self._guard():
-            return
         parsed = urlparse(self.path)
         route = parsed.path
+        open_route = route in ("/", "/api/health")
+        if not self._guard(need_token=not open_route):
+            return
         if route == "/api/health":
             self._json({"app": "share-it", "version": VERSION})
         elif route == "/":
             with open(os.path.join(STATIC_DIR, "index.html"), "rb") as fh:
                 data = fh.read()
+            # inject the token so same-origin fetches can authenticate
+            data = data.replace(b"</head>",
+                b'<script>window.__SHAREIT_TOKEN=' +
+                json.dumps(TOKEN).encode() + b';</script></head>', 1)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
@@ -686,6 +706,7 @@ class Handler(BaseHTTPRequestHandler):
             opts = _render_opts(body)
             try:
                 session = _session_entry(path)
+                pre_mtime = share._src_mtime(session)  # mtime of the bytes we're about to render
                 opts["art_mtime"] = _artifact_fingerprint(session, opts)
                 if route == "/api/share":
                     cached = share.find_cached(session, opts)
@@ -727,7 +748,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # nothing was shared — the client hears exactly why
                 return self._json({"error": f"share failed: {e}"}, 502)
             entry = share.record_share(session, result, opts, len(doc),
-                                       file_paths=shared_paths,
+                                       file_paths=shared_paths, src_mtime=pre_mtime,
                                        counts={"n_files": len(shared_paths),
                                                "n_images": len(media_objs)})
             return self._json({"url": entry["url"], "size": len(doc), "card": card,
@@ -996,6 +1017,9 @@ def _rescue_archive():
                 continue
             os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
             shutil.copy2(real, dest)
+            used += ent.get("size", 0)
+            if used > RESCUE_CAP_BYTES:
+                break  # aggregate cap reached — stop this pass
         except OSError:
             continue
 
@@ -1038,7 +1062,15 @@ def _background_worker():
             _t.sleep(5)
 
 
+def _write_token():
+    os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
+    fd = os.open(TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(TOKEN)
+
+
 def main():
+    _write_token()
     _fix_state_perms()
     _cleanup_state()
     _load_cache()

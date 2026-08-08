@@ -62,7 +62,7 @@ def render_markdown(session, messages, redact_secrets=True, include_thinking=Fal
                     messages_only=False, tool_output_limit=2000, tool_input_limit=800,
                     artifact_links=None, read_files=None, stats=None, mode="agent",
                     last_request="", cwd=None, expiry_label="", media_base=None):
-    src = "Claude Code" if session["source"] == "claude" else "Codex"
+    src = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}.get(session["source"], session["source"].title())
     date = time.strftime("%Y-%m-%d", time.localtime(session.get("last_used") or session.get("mtime") or time.time()))
     n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
                  and (m.get("text") or "").strip())
@@ -357,7 +357,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
                 tool_output_limit=2000, tool_input_limit=800,
                 mode_label="human", expiry_label="", media_base=None):
     """Reader page: the conversation as a chat, agent work folded between turns."""
-    src_label = "Claude Code" if session["source"] == "claude" else "Codex"
+    src_label = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}.get(session["source"], session["source"].title())
     logo = _LOGOS["claude" if session["source"] == "claude" else "codex"]
     date = time.strftime("%B %-d, %Y", time.localtime(session.get("last_used") or session.get("mtime") or time.time()))
 

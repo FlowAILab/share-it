@@ -147,12 +147,14 @@ def parse_claude(path):
         content = (obj.get("message") or {}).get("content")
         if t == "user":
             if isinstance(content, str):
-                if content.strip():
+                if content.strip() and not _is_injected(_ANSI.sub("", content).lstrip()):
                     messages.append({"role": "user", "text": content})
                 continue
             for block in content or []:
                 bt = block.get("type")
                 if bt == "text" and block.get("text", "").strip():
+                    if _is_injected(_ANSI.sub("", block["text"]).lstrip()):
+                        continue  # env/context injections are not the human speaking
                     messages.append({"role": "user", "text": block["text"]})
                 elif bt == "image":
                     src = block.get("source") or {}
@@ -220,7 +222,7 @@ def parse_codex(path):
             ) if m]
             if role == "user":
                 stripped = text.lstrip()
-                if (stripped and not stripped.startswith(_CODEX_CONTEXT_PREFIXES)) or media:
+                if (stripped and not _is_injected(stripped)) or media:
                     msg = {"role": "user", "text": text}
                     if media:
                         msg["media"] = media
@@ -355,7 +357,11 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
             except (json.JSONDecodeError, AttributeError):
                 fp = None
             if fp:
-                declared[os.path.realpath(fp)] = True
+                rp = os.path.realpath(fp)
+                home = os.path.realpath(os.path.expanduser("~")) + os.sep
+                if (rp.startswith(home) and "/Library/" not in rp
+                        and ".app/" not in rp and "/." not in rp[len(home) - 1:]):
+                    declared[rp] = True   # published, but still the user's own visible files
             continue
         if is_claude and m["name"] in _WRITE_TOOLS:
             if not m.get("ok"):  # denied or failed writes are not artifacts

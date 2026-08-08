@@ -136,9 +136,9 @@ class CursorAdapter(Adapter):
 
     def discover(self):
         out = []
-        for s in _cursor.discover():
-            title, cwd = _cursor.meta_for(s["id"])
-            out.append({"id": s["id"], "title": title, "cwd": cwd,
+        for s in _cursor.discover():   # one DB scan total, not one per session
+            title = s.get("title") or "(untitled)"
+            out.append({"id": s["id"], "title": title, "cwd": "",
                         "ts": s.get("ts") or 0})
         return out
 

@@ -51,9 +51,10 @@ teammate, or hand it to another agent to continue the work.
 
 ## 🔒 Yours, always
 
-Nothing leaves your Mac until you say so. Your sessions are **never used for training** —
-they're yours, on your own storage. Secrets get scrubbed automatically, and you see
-exactly what's in the link before it goes out.
+Nothing leaves your Mac until you hit share. Your sessions are **never used for training** —
+they're yours, on your own storage. The transcript text is scrubbed for common secret
+patterns before it's shared; the files you attach ship as-is, so glance at what's selected
+before sending. Links are public but unguessable, and expire on your schedule (or never).
 
 ## Build from source
 
