@@ -74,7 +74,9 @@ def _sessions_meta(db):
             cid = k.split(":", 1)[1]
             order = [h.get("bubbleId") for h in (v.get("fullConversationHeadersOnly") or [])
                      if isinstance(h, dict)]
-            meta[cid] = {"name": v.get("name") or "", "order": order}
+            ts = v.get("lastUpdatedAt") or v.get("createdAt") or 0  # ms epoch
+            meta[cid] = {"name": v.get("name") or "", "order": order,
+                         "ts": ts / 1000.0 if isinstance(ts, (int, float)) else 0}
     # legacy inline composer list (ItemTable)
     for k, v in _rows(db, "ItemTable"):
         if k == "composer.composerData" and isinstance(v, dict):
@@ -91,7 +93,8 @@ def discover():
     out = []
     for cid, m in _sessions_meta(_GLOBAL_DB).items():
         title = " ".join((m.get("name") or "").split())
-        out.append({"id": f"{_GLOBAL_DB}#{cid}", "title": title, "composer": cid})
+        out.append({"id": f"{_GLOBAL_DB}#{cid}", "title": title, "composer": cid,
+                    "ts": m.get("ts") or 0})
     return out
 
 

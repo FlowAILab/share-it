@@ -4,6 +4,7 @@ Unified message: {"role": "user"|"assistant"|"thinking"|"tool", ...}
   user/assistant/thinking: {"role", "text"}
   tool: {"role": "tool", "name", "input", "output"}
 """
+import datetime as _dt
 import glob
 import json
 import os
@@ -630,7 +631,32 @@ def _codex_sqlite_index():
     return index
 
 
-SCHEMA_VERSION = 3  # bump when entry shape or title/meta extraction changes
+SCHEMA_VERSION = 4  # bump when entry shape or title/meta extraction changes
+
+
+_TS_RE = re.compile(rb'"timestamp"\s*:\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)(?:Z|[+-]\d{2}:?\d{2})?"')
+
+
+def last_event_ts(path, mtime):
+    """Canonical last-used time: the newest `timestamp` the harness itself wrote
+    into the transcript. Filesystem mtime lies — rewrites, copies and backup
+    tools bump it in batches — so it is only the fallback."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            fh.seek(max(0, size - 65536))
+            tail = fh.read()
+    except OSError:
+        return mtime
+    stamps = _TS_RE.findall(tail)
+    if not stamps:
+        return mtime
+    try:
+        iso = stamps[-1].decode()
+        dt = _dt.datetime.fromisoformat(iso).replace(tzinfo=_dt.timezone.utc)
+        return dt.timestamp()
+    except ValueError:
+        return mtime
 
 
 def scan_sessions(cache):
@@ -679,7 +705,9 @@ def scan_sessions(cache):
                 title = " ".join((title or "").split())[:120] or "(untitled)"
                 ent = {"path": path, "source": source, "title": title,
                        "cwd": cwd or "", "project": os.path.basename(cwd) if cwd else "",
-                       "mtime": st.st_mtime, "size": st.st_size, "subagent": subagent,
+                       "mtime": st.st_mtime, "size": st.st_size,
+                       "last_used": last_event_ts(path, st.st_mtime),
+                       "subagent": subagent,
                        "model": extra.get("model", ""), "tokens": extra.get("tokens", 0),
                        "branch": extra.get("branch", ""), "v": SCHEMA_VERSION}
                 ent["app"] = _app_for(ent, cowork_ids)
@@ -690,24 +718,28 @@ def scan_sessions(cache):
     # non-file harnesses (e.g. Cursor SQLite) contribute via adapter.discover()
     try:
         import adapters as _ad
-        import time as _t
         for ad in _ad.ADAPTERS:
             for d in ad.discover():
                 ent = cache.get(d["id"])
                 if ent is None:
+                    # the harness's own timestamp, or 0 — never time.time(), which
+                    # would fake-freshen every undated session on every scan
+                    ts = d.get("ts") or 0
                     ent = {"path": d["id"], "source": ad.id, "app": ad.id,
                            "title": (d.get("title") or "(untitled)")[:120],
                            "cwd": d.get("cwd", ""), "project": os.path.basename(d.get("cwd", "")),
-                           "mtime": _t.time(), "size": 0, "subagent": False,
+                           "mtime": ts, "size": 0, "last_used": ts, "subagent": False,
                            "model": "", "tokens": 0, "branch": "", "v": SCHEMA_VERSION}
                     cache[d["id"]] = ent
+                elif d.get("ts"):
+                    ent["last_used"] = ent["mtime"] = d["ts"]  # cursor keeps updating
                 sessions.append(ent)
     except Exception:
         pass
     live = {s["path"] for s in sessions}
     for stale in [k for k in cache if k not in live]:
         del cache[stale]
-    sessions.sort(key=lambda s: -s["mtime"])
+    sessions.sort(key=lambda s: -s.get("last_used", s["mtime"]))
     return sessions
 
 

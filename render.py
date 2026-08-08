@@ -63,7 +63,7 @@ def render_markdown(session, messages, redact_secrets=True, include_thinking=Fal
                     artifact_links=None, read_files=None, stats=None, mode="agent",
                     last_request="", cwd=None, expiry_label=""):
     src = "Claude Code" if session["source"] == "claude" else "Codex"
-    date = time.strftime("%Y-%m-%d", time.localtime(session["mtime"]))
+    date = time.strftime("%Y-%m-%d", time.localtime(session.get("last_used") or session.get("mtime") or time.time()))
     n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
                  and (m.get("text") or "").strip())
     included = [f"{n_msgs} messages"]
@@ -283,7 +283,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
     """Reader page: the conversation as a chat, agent work folded between turns."""
     src_label = "Claude Code" if session["source"] == "claude" else "Codex"
     logo = _LOGOS["claude" if session["source"] == "claude" else "codex"]
-    date = time.strftime("%B %-d, %Y", time.localtime(session["mtime"]))
+    date = time.strftime("%B %-d, %Y", time.localtime(session.get("last_used") or session.get("mtime") or time.time()))
 
     def clean(text):
         text = _strip_base64(text or "")

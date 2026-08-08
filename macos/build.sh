@@ -22,6 +22,8 @@ for f in $(git -C .. ls-files '*.py' 2>/dev/null | grep -v '^tests/' || echo ../
   cp "../$f" "$DEST/Contents/Resources/backend/$(basename "$f")" 2>/dev/null || cp "$f" "$DEST/Contents/Resources/backend/"
 done
 cp ../static/index.html "$DEST/Contents/Resources/backend/static/"
+[ -f AppIcon.icns ] || python3 make-icon.py
+cp AppIcon.icns "$DEST/Contents/Resources/AppIcon.icns"
 
 if [ -n "$BUNDLE_PY" ]; then
   PYROOT="${SHAREIT_PYTHON:-/tmp/shareit-py/python}"
@@ -39,6 +41,7 @@ cat > "$DEST/Contents/Info.plist" <<'PLIST'
   <key>CFBundleVersion</key><string>2.0.0</string>
   <key>CFBundleShortVersionString</key><string>2.0.0</string>
   <key>CFBundleExecutable</key><string>share-it</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
