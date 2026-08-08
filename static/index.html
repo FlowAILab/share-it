@@ -312,7 +312,7 @@ function menuItemsFor(s) {
     const sh = visibleShares()[sel];
     if (!sh) return [];
     const items = [
-      {t: "Copy Link", k: "⌘C", run: () => { copyText(sh.url); toast("Link copied"); }},
+      {t: "Copy Link", k: "⌘C", run: () => { copyText(sh.url); toast("Copied link"); }},
       {t: "Copy for Agent", run: () => { copyText(
         "Continue this task from the shared session below. Preserve prior decisions, "
         + "inspect the included files and begin with the last unresolved request:\n\n" + sh.url);
@@ -775,7 +775,12 @@ $("#list").addEventListener("click", (ev) => {
   const openBtn = t.closest("[data-open]");
   if (openBtn) { api("/api/open_url", {url: openBtn.dataset.open}).catch((e) => toast(e.message)); return; }
   const copyBtn = t.closest("[data-copy]");
-  if (copyBtn) { copyText(copyBtn.dataset.copy); flashCopied(s.path); return; }
+  if (copyBtn) {
+    copyText(copyBtn.dataset.copy); flashCopied(s.path);
+    const n = s._share?.n_files;
+    toast(`Copied chat link${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
+    return;
+  }
   if (t.closest(".row-line")) { sel = +t.closest(".row").dataset.i; selPath = s.path; toggle(s); }
 });
 $("#list").addEventListener("contextmenu", (ev) => {
@@ -1003,7 +1008,12 @@ async function doShareArtifact(s, file) {
 
 async function doShare(s, modeOverride) {
   if (!s || s._share === "busy") return;
-  if (s._share?.url && !modeOverride) { copyText(s._share.url); return; }
+  if (s._share?.url && !modeOverride) {
+    copyText(s._share.url);
+    const n = s._share.n_files;
+    toast(`Copied chat link${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
+    return;
+  }
   s._share = "busy"; render();
   const gen = optsGen;
   try {
@@ -1012,11 +1022,10 @@ async function doShare(s, modeOverride) {
       mode: modeOverride || opts.mode, expires_hours: opts.expiry,
       ...(selFiles ? {files: selFiles} : {})});
     if (gen !== optsGen) { s._share = null; render(); return; }  // options changed mid-flight
-    s._share = {url: d.url, provider: d.provider, expires: d.expires, card: d.card, fresh: true};
+    s._share = {url: d.url, provider: d.provider, expires: d.expires, card: d.card,
+                n_files: d.n_files || 0, fresh: true};
     copyText(opts.card && d.card ? `${d.card}\n${d.url}` : d.url);
-    const bits = ["Link copied · chat"];
-    if (d.n_files) bits.push(`${d.n_files} artifact${d.n_files > 1 ? "s" : ""}`);
-    toast(bits.join(" · "));
+    toast(`Copied chat link${d.n_files ? ` · ${d.n_files} file${d.n_files > 1 ? "s" : ""}` : ""}`);
     flashCopied(s.path);
     if (expanded !== s.path) toggle(s);  // reveal the link row
     return;
@@ -1220,7 +1229,7 @@ document.addEventListener("keydown", (e) => {
              && !window.getSelection()?.toString())) {
       e.preventDefault();
       const s = live[sel];
-      if (s) { copyText(s.url); toast("Link copied"); }
+      if (s) { copyText(s.url); toast("Copied link"); }
     } else if (e.key === "Escape") {
       e.preventDefault();
       if ($("#q").value) { $("#q").value = ""; render(); }
