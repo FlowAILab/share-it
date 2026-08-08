@@ -108,9 +108,28 @@ def _workspace_cwd(path):
         return ""
 
 
+_META_CACHE = {}   # path -> (mtime, size, (title, wd, is_session))
+
+
 def _head_meta(path):
-    """(title, wd, is_session) cheaply — flat-json head or the .jsonl Initial line,
-    WITHOUT replaying the whole mutation log (that's parse()'s job)."""
+    """(title, wd, is_session) — memoized by mtime+size so warm scans of
+    unchanged files don't re-read; a rename changes the file and re-reads."""
+    try:
+        st = os.stat(path)
+        hit = _META_CACHE.get(path)
+        if hit and hit[0] == st.st_mtime and hit[1] == st.st_size:
+            return hit[2]
+    except OSError:
+        return "", "", False
+    res = _read_head_meta(path)
+    _META_CACHE[path] = (st.st_mtime, st.st_size, res)
+    if len(_META_CACHE) > 2000:
+        for k in list(_META_CACHE)[:500]:
+            del _META_CACHE[k]
+    return res
+
+
+def _read_head_meta(path):
     try:
         if path.endswith(".jsonl"):
             title = wd = ""
