@@ -308,25 +308,43 @@ def find_cached(session, opts, artifact=None):
         # export_v gate FIRST — legacy records lack the fields dereferenced below
         if s.get("export_v") != EXPORT_SCHEMA_VERSION:
             continue
+        exp = s.get("expires")
+        exp_ok = exp is None or (isinstance(exp, (int, float)) and exp > now + 1800)
         if (s.get("path") == session["path"] and not s.get("deleted")
                 and s.get("artifact") == artifact
                 and s.get("src_mtime") == live_mtime
                 and s.get("req_hours") == opts.get("expires_hours", EXPIRES_HOURS)
-                and (s.get("expires") is None or s.get("expires", 0) > now + 1800)
+                and exp_ok
                 and s.get("redacted") == bool(opts.get("redact", True))
                 and s.get("mode", "full") == opts.get("mode", "full")
                 and s.get("fmt", "md") == opts.get("fmt", "md")
                 and (artifact or s.get("art_mtime", 0) == opts.get("art_mtime", 0))
                 and (artifact or s.get("with_files", True) == bool(opts.get("artifacts", True)))
                 and s.get("thinking") == bool(opts.get("thinking"))):
+            # #5: for single-artifact shares (no content-hash fingerprint), verify
+            # the recorded snapshot still matches the file's current bytes
+            if artifact and not _snapshot_matches(s.get("snapshot"), [artifact]):
+                continue
             return s
     return None
+
+
+def _snapshot_matches(snapshot, paths):
+    if not snapshot:
+        return True   # nothing recorded (legacy) — fall back to mtime match
+    by_path = {e.get("path"): e for e in snapshot if isinstance(e, dict)}
+    live = _snapshot(paths)
+    for cur in live:
+        was = by_path.get(cur["path"])
+        if not was or was.get("sha256") != cur.get("sha256"):
+            return False
+    return True
 
 
 def mark_deleted(url):
     with _LOCK:
         shares = load_shares()
         for s in shares:
-            if s["url"] == url:
+            if s.get("url") == url:
                 s["deleted"] = True
         _state_file_write(SHARES_PATH, json.dumps(shares, indent=1))

@@ -583,11 +583,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"app": "share-it", "version": VERSION})
         elif route == "/":
             with open(os.path.join(STATIC_DIR, "index.html"), "rb") as fh:
-                data = fh.read()
-            if not os.environ.get("SHAREIT_TOKEN"):  # dev (no shell): browser needs it
-                data = data.replace(b"</head>",
-                    b'<script>window.__SHAREIT_TOKEN=' +
-                    json.dumps(TOKEN).encode() + b';</script></head>', 1)
+                data = fh.read()   # never carries the token; the page reads it
+                                   # from injection (app) or the ?t= URL (dev)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
@@ -1113,7 +1110,8 @@ def main():
     url = f"http://127.0.0.1:{PORT}"
     print(f"share-it running at {url}")
     if "--no-browser" not in sys.argv:
-        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+        dev_url = url if os.environ.get("SHAREIT_TOKEN") else f"{url}/?t={TOKEN}"
+        threading.Timer(0.4, lambda: webbrowser.open(dev_url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

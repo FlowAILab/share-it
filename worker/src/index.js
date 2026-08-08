@@ -142,12 +142,14 @@ export default {
       const [, id, name] = m;
       if (req.method === "DELETE" && !name) {
         if (!authed(req, env)) return new Response("unauthorized", { status: 401 });
-        // possession of the fleet token is not enough — deleting a bundle needs
-        // its per-share delKey (kept only by the creator)
         const manifest = await getManifest(env, id);
-        if (manifest?.delKey) {
+        // committed bundle → the per-share delKey is REQUIRED (fleet token alone
+        // can't delete someone else's share). Uncommitted staging (no manifest)
+        // is deletable by the token so a failed upload can roll itself back.
+        if (manifest) {
           const given = req.headers.get("X-Del-Key") || "";
-          if (given !== manifest.delKey) return new Response("forbidden", { status: 403 });
+          if (!manifest.delKey || given !== manifest.delKey)
+            return new Response("forbidden", { status: 403 });
         }
         await deleteBundle(env, id);
         return new Response("deleted");

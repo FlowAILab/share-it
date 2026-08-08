@@ -512,7 +512,12 @@ function optsChanged() {  // options affect what a share contains — drop per-r
   saveOpts(); renderOpts(); render();
 }
 
-const TOKEN = window.__SHAREIT_TOKEN || "";
+const TOKEN = (() => {
+  if (window.__SHAREIT_TOKEN) return window.__SHAREIT_TOKEN;   // app: injected
+  const t = new URLSearchParams(location.search).get("t") || "";  // dev: ?t=
+  if (t) history.replaceState(null, "", location.pathname);   // drop it from the URL
+  return t;
+})();
 async function api(path, body) {
   const hdrs = {"X-Shareit-Token": TOKEN};
   if (body) hdrs["Content-Type"] = "application/json";
