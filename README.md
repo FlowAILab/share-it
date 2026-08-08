@@ -16,22 +16,21 @@
 
 ---
 
-Press **⌥S**, find your session, hit **⏎** — the link is on your clipboard.
-That link holds the **complete session**: the whole conversation and the files it
-produced. Send it to a teammate, or paste it into another agent to pick up right
-where you left off.
+Press **⌥S**, find your session — that's it. The link holds the **complete session**:
+the whole conversation and the files it produced. Send it to a teammate, or paste it
+into another agent to pick up right where you left off.
 
 ### Core
 
-- **🔗 One-click link** — the full session at a short URL. That's the whole app.
+- **🔗 Share a link** — press **⏎**. A short URL to the full session lands on your clipboard.
+- **📋 Copy the session** — press **⌘C**. The whole conversation as a file, no upload.
+- **📎 Copy the files** — the artifacts a session made (PDFs, images, code) straight to
+  Finder, Slack, or email — real files, not screenshots.
 
 ### Also handy
 
-- **📋 Copy the session** — grab the conversation as a file, no upload.
-- **📎 Copy the files** — the artifacts a session made (PDFs, images, code) straight to
-  Finder, Slack, or email — real files, not screenshots.
-- Reader-page mode for humans · resume a session in its original app · full-text search ·
-  keeps sessions your tools auto-delete · link expiry (∞ / 1d / 3d / 7d).
+Reader-page mode for humans · resume a session in its original app · full-text search ·
+keeps sessions your tools auto-delete · link expiry (∞ / 1d / 3d / 7d).
 
 ### Private by default
 
