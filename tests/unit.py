@@ -222,6 +222,19 @@ def main():
     check("changed files invalidate annotations", "art_list" not in stale)
 
 
+    # regression: codex generated-image artifacts must carry mtime (share
+    # fingerprint + recency sort subscript it -> KeyError 'mtime' in the UI)
+    gen = fixture(tmp, "genimg.png", ["fake"])
+    real_gen = parsers._codex_generated_images
+    parsers._codex_generated_images = lambda _real: [gen]
+    try:
+        arts = parsers.session_artifacts(fixture(tmp, "codex2.jsonl", CODEX_LINES),
+                                         source="codex", cwd=None)
+        check("generated-image artifact carries mtime",
+              arts and all("mtime" in a for a in arts), str(arts))
+    finally:
+        parsers._codex_generated_images = real_gen
+
     print()
     if FAIL:
         print(f"{len(FAIL)} FAILURES: {FAIL}")

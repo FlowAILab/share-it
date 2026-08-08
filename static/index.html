@@ -155,6 +155,8 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .resume:hover { color: var(--ink); }
 .openin { display: inline-flex; align-items: center; gap: 5px; }
 .morechips { font-size: 11px; color: var(--faint); align-self: center; }
+.art .selmark { color: #7fc97f; font-weight: 700; margin-right: 1px; }
+.art:focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
 .morechips:hover { color: var(--ink); }
 .applogo { display: inline-flex; width: 12px; height: 12px; }
 .applogo svg { width: 12px; height: 12px; }
@@ -295,6 +297,11 @@ function menuItemsFor(s) {
                   : [...(s.art_list || []), ...(s.read_list || [])];
   const fp = files.map((f) => f.path);
   const nf = files.length;
+  // what ⌘C actually carries: your selection, else the primary deliverable, else everything
+  const selPaths = s._sel?.size ? [...s._sel] : (p?.primary?.length ? p.primary : fp);
+  const nSelM = selPaths.length;
+  const base = (q) => q.split("/").pop();
+  const payload = nSelM === 1 ? base(selPaths[0]) : `${nSelM} files`;
   const items = [
     {t: "Share for Agent", k: "⏎", run: () => doShare(s, "agent")},
     {t: "Share for Human", run: () => doShare(s, "human")},
@@ -308,9 +315,15 @@ function menuItemsFor(s) {
     {sep: 1},
     {t: `Copy Session (.${opts.mode === "human" ? "html" : "md"})`, k: nf ? "" : "⌘C", run: () => copySession(s, null, [])},
   ];
-  if (nf) items.push(
-    {t: `Copy Session + ${nf} File${nf > 1 ? "s" : ""}`, k: "⌘C", run: () => copySession(s, null, fp)},
-    {t: `Copy ${nf} File${nf > 1 ? "s" : ""}`, k: "⇧⌘C", run: () => copyFilesOnly(s, fp)});
+  if (nf) {
+    items.push(
+      {t: `Copy Session + ${payload}`, k: "⌘C", run: () => copySession(s, null, selPaths)},
+      {t: `Copy ${payload}`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
+    if (nSelM < nf) items.push({t: `Choose Files… (${nf} total)`, run: () => {
+      if (expanded !== s.path) toggle(s);
+      s._chipsOpen = true; render();
+    }});
+  }
   items.push({t: "Copy Last Output", sub: [
     {t: "Full Answer", run: () => copyLastAnswer(s)},
     {t: "Last Code Block", run: () => copyLastCode(s)},
@@ -616,7 +629,11 @@ function renderList() {
      <span class="grow"></span><span>${(() => {
        const ex = vis.find((x) => x.path === expanded);
        if (ex?._sel?.size) return `<kbd>⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌥click</kbd> reveal in Finder`;
-       return `<kbd>⌘C</kbd> copy session · <kbd>⌘K</kbd> actions · <kbd>→</kbd> peek · <kbd>⌥⏎</kbd> open in app`;
+       {
+         const cur = vis[sel];
+         const openHint = cur && openTargetFor(cur) ? ` · <kbd>⌥⏎</kbd> open in ${openTargetFor(cur)}` : "";
+         return `<kbd>⌘C</kbd> copy session · <kbd>⌘K</kbd> actions · <kbd>→</kbd> peek${openHint}`;
+       }
      })()}</span>`;
   const lnk = list.querySelector("#lnk[data-fresh]");
   if (lnk) {  // highlight once, right after creation — not on every re-render
@@ -664,6 +681,7 @@ $("#list").addEventListener("click", (ev) => {
       return;
     }
     s._sel = s._sel || new Set();
+    s._selTouched = true;
     s._sel.has(art.dataset.art) ? s._sel.delete(art.dataset.art) : s._sel.add(art.dataset.art);
     return render();
   }
@@ -671,6 +689,7 @@ $("#list").addEventListener("click", (ev) => {
   if (t.closest("#art-all")) {
     const p = peekCache[s.path];
     const all = [...(p?.artifacts || []), ...(p?.reads || [])].map((a) => a.path);
+    s._selTouched = true;
     s._sel = (s._sel?.size === all.length) ? new Set() : new Set(all);
     return render();
   }
@@ -770,12 +789,13 @@ function cardHtml(s) {
     const st = (s._art || {})[a.path];
     const on = s._sel.has(a.path);
     const mark = st === "busy" ? "…" : lastCopied === a.path ? "✓" : "";
+    const selmark = on ? '<b class="selmark">✓</b>' : "";
     const kindWord = {"a-new": "created", "a-mod": "modified", "a-ref": "read (referenced)"}[cls];
     const tip = `${kindWord} · ${a.path}${a.size != null ? ` · ${fmtSize(a.size)}` : ""}` +
       `\nclick select · 2×click open · right-click Quick Look · ⌘C copy · ⌥click reveal` +
       `${a.head ? "\n\n" + a.head.slice(0, 90) + "…" : ""}`;
     return `<span class="art ${cls}${on ? " picked" : ""}" data-art="${esc(a.path)}" title="${esc(tip)}">
-      <span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
+      ${selmark}<span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
   };
   const allChips = p ? [
     ...(p.artifacts || []).filter((a) => a.kind === "created").map((a) => [a, "a-new"]),
@@ -783,17 +803,18 @@ function cardHtml(s) {
     ...(p.reads || []).map((a) => [a, "a-ref"]),
   ] : [];
   const CHIP_CAP = 8;
-  const capped = !s._chipsOpen && allChips.length > CHIP_CAP;
-  // never hide a selected file behind the fold
-  const visChips = capped
-    ? allChips.filter(([a]) => s._sel.has(a.path))
-        .concat(allChips.filter(([a]) => !s._sel.has(a.path))).slice(0, CHIP_CAP)
-    : allChips;
+  const prim = new Set(p?.primary || []);
+  // primary deliverables and anything selected stay visible; the rest folds
+  const front = allChips.filter(([a]) => prim.has(a.path) || s._sel.has(a.path));
+  const rest = allChips.filter(([a]) => !prim.has(a.path) && !s._sel.has(a.path));
+  const fold = !s._chipsOpen && (front.length ? rest.length > 0 : allChips.length > CHIP_CAP);
+  const visChips = fold ? (front.length ? front : allChips.slice(0, CHIP_CAP)) : allChips;
   const groups = visChips.map(([a, cls]) => chip(a, cls));
-  if (capped) groups.push(`<span role="button" tabindex="0" class="tog morechips" id="chips-more"
-    title="show every file">+${allChips.length - visChips.length} more</span>`);
-  else if (s._chipsOpen && allChips.length > CHIP_CAP)
-    groups.push('<span role="button" tabindex="0" class="tog morechips" id="chips-more" title="collapse the list">less</span>');
+  const hidden = allChips.length - visChips.length;
+  if (fold && hidden > 0) groups.push(`<span role="button" tabindex="0" class="tog morechips" id="chips-more"
+    title="show every file this session touched">${front.length ? "other changes " : ""}+${hidden} ›</span>`);
+  else if (s._chipsOpen && (front.length ? rest.length > 0 : allChips.length > CHIP_CAP))
+    groups.push('<span role="button" tabindex="0" class="tog morechips" id="chips-more" title="collapse the list">‹ less</span>');
   const catNote = p?.pending && s.arts
     ? '<div class="ctl"><span class="share-meta">cataloguing files… (a moment, then reopen)</span></div>' : "";
   const nSel = s._sel.size;
@@ -824,7 +845,12 @@ async function toggle(s) {
   expanded = expanded === s.path ? null : s.path;
   render();
   if (expanded && !peekCache[s.path]) {
-    try { peekCache[s.path] = await api("/api/peek?path=" + encodeURIComponent(s.path)); }
+    try {
+      peekCache[s.path] = await api("/api/peek?path=" + encodeURIComponent(s.path));
+      const pk = peekCache[s.path];
+      if (!s._selTouched && !(s._sel?.size) && pk.primary?.length)
+        s._sel = new Set(pk.primary);
+    }
     catch { peekCache[s.path] = {messages: [{role: "assistant", text: "unreadable"}], artifacts: []}; }
     if (expanded === s.path) render();
   }
@@ -907,8 +933,10 @@ async function doShare(s, modeOverride) {
   s._share = "busy"; render();
   const gen = optsGen;
   try {
+    const selFiles = (peekCache[s.path] && s._sel?.size) ? [...s._sel] : undefined;
     const d = await api("/api/share", {path: s.path, redact: opts.redact,
-      mode: modeOverride || opts.mode, expires_hours: opts.expiry});
+      mode: modeOverride || opts.mode, expires_hours: opts.expiry,
+      ...(selFiles ? {files: selFiles} : {})});
     if (gen !== optsGen) { s._share = null; render(); return; }  // options changed mid-flight
     s._share = {url: d.url, provider: d.provider, expires: d.expires, card: d.card, fresh: true};
     copyText(opts.card && d.card ? `${d.card}\n${d.url}` : d.url);
@@ -930,7 +958,8 @@ async function refresh() {
     const keep = new Map(sessions.map((s) => [s.path, s]));
     sessions = data.sessions.map((n) => {
       const old = keep.get(n.path);
-      return old && old.mtime === n.mtime ? Object.assign(n, {_share: old._share, _art: old._art}) : n;
+      if (old && old.mtime !== n.mtime) delete peekCache[n.path];  // transcript grew — preview is stale
+      return old && old.mtime === n.mtime ? Object.assign(n, {_share: old._share, _art: old._art, _sel: old._sel, _selTouched: old._selTouched, _chipsOpen: old._chipsOpen}) : n;
     });
     stores = data.stores || [];
     render();

@@ -6,6 +6,7 @@ Nothing is uploaded unless you click Share.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -145,6 +146,12 @@ def _fix_state_perms():
 
 def _allowed(path):
     real = os.path.realpath(path)
+    if "#" in path:  # non-file harness ids (Cursor SQLite) — the adapter decides
+        try:
+            adapters.for_path(path)
+            return True
+        except ValueError:
+            return False
     return real.endswith(".jsonl") and any(
         real.startswith(os.path.realpath(root) + os.sep)
         for root in adapters.allowed_roots())
@@ -191,10 +198,13 @@ def _render_opts(body):
         mode = "agent"
     # the mode decides the format and whether reasoning ships — callers cannot mix
     fmt = "html" if mode == "human" else "md"
+    files = body.get("files")
+    if not (isinstance(files, list) and all(isinstance(f, str) for f in files)):
+        files = None
     return dict(redact=body.get("redact", True),
                 thinking=mode == "deep",
                 mode=mode, messages_only=mode == "human", expires_hours=hours,
-                artifacts=body.get("artifacts", True), fmt=fmt)
+                artifacts=body.get("artifacts", True), fmt=fmt, files=files)
 
 
 def _open_in_terminal(cmd, cwd):
@@ -227,12 +237,17 @@ def _artifact_fingerprint(session, opts):
     addition or edit changes it, so a stale bundle can never be served as cached."""
     import hashlib
     pool = _session_artifacts(session)
-    if opts.get("mode") == "deep":
-        pool = pool + adapters.by_id(session["source"]).reads(
+    if opts.get("mode") == "deep" or opts.get("files") is not None:
+        pool = pool + [r for r in adapters.by_id(session["source"]).reads(
             session["path"], cwd=session.get("cwd") or None)
+            if not any(a["path"] == r["path"] for a in pool)]
+    chosen = opts.get("files")
     parts = []
     for a in pool:
-        if opts.get("mode") != "deep" and a["kind"] != "created":
+        if chosen is not None:
+            if a["path"] not in set(chosen):
+                continue
+        elif opts.get("mode") != "deep" and a["kind"] != "created":
             continue
         try:
             st = os.stat(a["path"])
@@ -273,7 +288,16 @@ def _artifact_links(session, opts, upload=True):
         return []
     art_opts = {"expires_hours": opts["expires_hours"]}
     arts = _session_artifacts(session)
-    if opts.get("mode") == "deep":
+    chosen = opts.get("files")
+    if chosen is not None:  # explicit selection wins over mode defaults
+        pool = arts + [{**r, "kind": "referenced"}
+                       for r in adapters.by_id(session["source"]).reads(
+                           session["path"], cwd=session.get("cwd") or None)
+                       if not any(a["path"] == r["path"] for a in arts)]
+        fset = set(chosen)
+        arts = [a for a in pool if a["path"] in fset
+                and a.get("size") is not None and a["size"] <= parsers.ARTIFACT_MAX_BYTES]
+    elif opts.get("mode") == "deep":
         arts = arts + [{**r, "kind": "referenced"}
                        for r in adapters.by_id(session["source"]).reads(
                            session["path"], cwd=session.get("cwd") or None)
@@ -453,7 +477,8 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
             self._json({"messages": messages, "last": last_answer,
-                        "artifacts": artifacts, "reads": reads, "pending": pending})
+                        "artifacts": artifacts, "reads": reads, "pending": pending,
+                        "primary": _primary_paths(artifacts, last_answer)})
         elif route == "/api/search":
             q = parse_qs(parsed.query).get("q", [""])[0]
             hits = search.search(q) if len(q.strip()) >= 2 else []
@@ -652,14 +677,41 @@ def _peek_texts(path, mtime):
         hit = _peekmem.get(path)
     if hit and hit[0] == mtime:
         return hit[1], hit[2]
-    msgs = parsers.peek_session(path)
-    last = parsers.peek_last_answer(path)
+    if "#" in path:  # non-file harness (Cursor) — parse via its adapter
+        full = adapters.for_path(path).parse(path)
+        clip = lambda t, n: t[:n] + ("…" if len(t) > n else "")
+        texts = [{"role": m["role"], "text": clip(" ".join(m["text"].split()), 280)}
+                 for m in full if m.get("text", "").strip()
+                 and m["role"] in ("user", "assistant")]
+        msgs = texts[:6]
+        last = next((clip(" ".join(m["text"].split()), 480) for m in reversed(full)
+                     if m["role"] == "assistant" and m.get("text", "").strip()), "")
+    else:
+        msgs = parsers.peek_session(path)
+        last = parsers.peek_last_answer(path)
     with _lock:
         _peekmem[path] = (mtime, msgs, last)
         if len(_peekmem) > 400:          # bound memory; oldest-inserted first
             for k in list(_peekmem)[:100]:
                 del _peekmem[k]
     return msgs, last
+
+
+_TEMPISH = re.compile(
+    r"(^|/)(node_modules|__pycache__|dist|build|target|\.wrangler|\.git|\.venv|venv)(/|$)"
+    r"|\.(log|tmp|lock|pyc|pyo|o|class|map|min\.js)$|(^|/)\.DS_Store$")
+
+
+def _primary_paths(artifacts, last_answer):
+    """The deliverable(s) a share should carry by default: files the final
+    answer names, else the freshest meaningful created files. Temp/build noise
+    never wins."""
+    meaningful = [a for a in artifacts if not _TEMPISH.search(a["path"])]
+    named = [a["path"] for a in meaningful if a["name"] in (last_answer or "")]
+    if named:
+        return named[:3]
+    created = [a["path"] for a in meaningful if a["kind"] == "created"]
+    return created[:3]
 
 
 def _peek_prewarm(n=40):

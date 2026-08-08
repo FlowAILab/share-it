@@ -27,13 +27,18 @@ mkdir -p "$STAGE/.background"
 cp "$WORK/dmg-bg.png" "$STAGE/.background/bg.png"
 
 rm -f "$WORK/rw.dmg"
-# a stale "Share-It" volume would make Finder style the wrong disk — clear it
-while [ -d "/Volumes/Share-It" ]; do
-  hdiutil detach "/Volumes/Share-It" -force || break
-done
+# a stale "Share-It" volume would make Finder style the wrong disk. Only eject
+# it when it is unmistakably OUR installer image — never someone else's volume.
+if [ -d "/Volumes/Share-It" ]; then
+  if [ -d "/Volumes/Share-It/Share-It.app" ] && [ -f "/Volumes/Share-It/.background/bg.png" ]; then
+    hdiutil detach "/Volumes/Share-It" || { echo "stale installer volume won't unmount — eject it and retry"; exit 1; }
+  else
+    echo "A different volume is mounted at /Volumes/Share-It — eject it and retry"; exit 1
+  fi
+fi
 hdiutil create -volname "Share-It" -srcfolder "$STAGE" -ov -format UDRW "$WORK/rw.dmg"
 MNT="$(hdiutil attach -readwrite -noverify -noautoopen "$WORK/rw.dmg" | awk -F'\t' '/\/Volumes\//{print $NF}')"
-[ -d "$MNT" ] || { echo "mount failed"; exit 1; }
+[ "$MNT" = "/Volumes/Share-It" ] || { echo "unexpected mountpoint '$MNT' — aborting"; hdiutil detach "$MNT" >/dev/null 2>&1; exit 1; }
 trap 'hdiutil detach "$MNT" -force >/dev/null 2>&1 || true' EXIT
 osascript <<OSA
 tell application "Finder"

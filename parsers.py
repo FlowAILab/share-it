@@ -334,7 +334,7 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
         except OSError:
             continue
         out.append({"path": g, "name": os.path.basename(g), "size": st.st_size,
-                    "kind": "created"})
+                    "kind": "created", "mtime": st.st_mtime})
     if not root:
         return out[:limit]
     seen_rc = {a["path"] for a in out}
@@ -357,7 +357,7 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
                         "kind": kind, "mtime": st.st_mtime})
             if len(out) >= limit:
                 break
-    out.sort(key=lambda a: -a["mtime"])  # most-recently-written first
+    out.sort(key=lambda a: -a.get("mtime", 0))  # most-recently-written first
     return out
 
 
@@ -497,12 +497,13 @@ def peek_session(path, max_texts=6, clip=280, max_bytes=6_000_000):
     return out[:max_texts]
 
 
-def peek_last_answer(path, clip=480, tail_bytes=4_000_000):
+def peek_last_answer(path, clip=480, tail_bytes=16_000_000):
     """The final assistant message, cheaply: scan the file TAIL only — never a
     full parse (transcripts reach tens of MB)."""
     real = os.path.realpath(path)
     is_claude = (real.startswith(os.path.realpath(CLAUDE_ROOT) + os.sep)
                  or real.startswith(os.path.realpath(RESCUE_ROOT) + os.sep))
+    is_subagent = is_claude and _is_claude_subagent_file(real)
     try:
         size = os.path.getsize(real)
         with open(real, "rb") as fh:
@@ -516,14 +517,15 @@ def peek_last_answer(path, clip=480, tail_bytes=4_000_000):
     last = ""
     for line in lines:
         line = line.strip()
-        if not line or len(line) > 2_000_000:
+        if not line:
             continue
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
         if is_claude:
-            if obj.get("type") != "assistant" or obj.get("isSidechain"):
+            # sidechain records ARE the conversation inside a subagent transcript
+            if obj.get("type") != "assistant" or (obj.get("isSidechain") and not is_subagent):
                 continue
             c = (obj.get("message") or {}).get("content")
             if isinstance(c, list):
@@ -532,6 +534,12 @@ def peek_last_answer(path, clip=480, tail_bytes=4_000_000):
                         last = b["text"]
         else:
             payload = obj.get("payload") or {}
+            # bare records (older codex rollouts have no response_item wrapper)
+            if obj.get("type") == "message" and obj.get("role") == "assistant":
+                t = _content_text(obj.get("content"))
+                if t.strip():
+                    last = t
+                continue
             if obj.get("type") != "response_item":
                 continue
             pt = payload.get("type")
@@ -687,16 +695,18 @@ SCHEMA_VERSION = 4  # bump when entry shape or title/meta extraction changes
 def _parse_iso_ts(iso):
     """ISO-8601 → epoch. Timestamps without an offset are treated as UTC (both
     Claude Code and Codex write trailing-Z UTC stamps)."""
+    if not isinstance(iso, str) or not iso:
+        return None
     try:
         dt = _dt.datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
+    except ValueError:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_dt.timezone.utc)
     return dt.timestamp()
 
 
-def last_event_ts(path, mtime, _windows=(65536, 1_048_576)):
+def last_event_ts(path, mtime):
     """Canonical last-used time: the newest top-level `timestamp` the harness
     itself wrote into the transcript. Filesystem mtime lies — rewrites, copies
     and backup tools bump it in batches — so it is only the fallback.
@@ -708,7 +718,16 @@ def last_event_ts(path, mtime, _windows=(65536, 1_048_576)):
         size = os.path.getsize(path)
     except OSError:
         return mtime
-    for window in _windows:
+    # widen until the window covers the file — a single final record can exceed
+    # any fixed window (codex base64 image lines), and mtime is a bad fallback
+    window = 65536
+    windows = []
+    while True:
+        windows.append(window)
+        if window >= size:
+            break
+        window *= 8
+    for window in windows:
         try:
             with open(path, "rb") as fh:
                 fh.seek(max(0, size - window))
@@ -733,8 +752,6 @@ def last_event_ts(path, mtime, _windows=(65536, 1_048_576)):
                     best = ts if best is None else max(best, ts)
         if best is not None:
             return best
-        if window >= size:
-            break  # already read the whole file — nothing more to find
     return mtime
 
 
