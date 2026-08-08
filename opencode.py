@@ -101,7 +101,8 @@ def parse(session_id):
             for mid, data in con.execute(
                     "SELECT id, data FROM message WHERE session_id = ? ORDER BY id", (sid,)):
                 try:
-                    roles[mid] = (json.loads(data) or {}).get("role")
+                    md = json.loads(data)
+                    roles[mid] = md.get("role") if isinstance(md, dict) else None
                 except (json.JSONDecodeError, TypeError):
                     roles[mid] = None
         for mid, data in ([] if "part" not in tables else con.execute(
@@ -134,9 +135,14 @@ def parse(session_id):
                 c = d.get("content")
                 if not text and isinstance(c, str):
                     text = c
+                think = ""
                 if not text and isinstance(c, list):    # v2 assistant: block array
                     text = "".join(b.get("text", "") for b in c
                                    if isinstance(b, dict) and b.get("type") == "text")
+                    think = "".join(b.get("text", "") for b in c
+                                    if isinstance(b, dict) and b.get("type") == "reasoning")
+                    if think.strip() and role == "assistant":
+                        msgs.append({"role": "thinking", "text": think})
                 if not text:
                     text = "".join(p.get("text", "") for p in (d.get("parts") or [])
                                    if isinstance(p, dict) and p.get("type") == "text")

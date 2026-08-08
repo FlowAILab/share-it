@@ -22,9 +22,10 @@
 ---
 
 Share-It indexes every **AI agent session** on your Mac — Claude Code, Codex, Cursor,
-Cowork — in one fast, local search. Find any chat and turn it into a shareable link in a
-single keystroke: the full conversation, the files the agent built, and the screenshots you
-pasted in. Send it to a teammate, or hand it to another agent to continue the work.
+Copilot, Cline, Continue, OpenCode, and more ([full list below](#works-with)) — in one fast,
+local search. Find any chat and turn it into a shareable link in a single keystroke: the full
+conversation, the files the agent built, and the screenshots you pasted in. Send it to a
+teammate, or hand it to another agent to continue the work.
 
 ## Quickstart
 
@@ -50,6 +51,26 @@ pasted in. Send it to a teammate, or hand it to another agent to continue the wo
 - 🛟 **Nothing gets lost** — Claude wipes old sessions after ~30 days; Share-It quietly
   keeps them, and lets you search everything you've ever done.
 - ⏳ **Your rules** — links last forever or 1 / 3 / 7 days, and vanish in one click.
+
+## Works with
+
+Share-It indexes every AI-coding session on your Mac — no config, it just finds them:
+
+| | Client | Where it reads |
+|---|---|---|
+| 🌸 | **Claude Code** | CLI · desktop · the VS Code extension (same store) |
+| 🟣 | **Cowork** | Claude desktop agent mode |
+| ⬛ | **Codex** | CLI · desktop |
+| ▦ | **Cursor** | editor chat + composer |
+| ▶ | **Continue** | VS Code / JetBrains extension |
+| ⚡ | **Cline** &amp; **Roo Code** | VS Code task history |
+| 🤖 | **GitHub Copilot Chat** | VS Code chat sessions |
+| 🧭 | **OpenCode** | terminal agent |
+| 🪿 | **Goose** | terminal agent |
+| π | **Pi** | terminal coding agent |
+
+New client? It's one small file in [`adapters.py`](adapters.py) — PRs welcome.
+*(Cloud-only tools like ChatGPT keep no local transcript, so they can't be indexed.)*
 
 ## 🔒 Yours, always
 

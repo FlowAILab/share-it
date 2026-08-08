@@ -94,6 +94,8 @@ def _jsonl_meta(path):
         with open(path, errors="ignore") as fh:
             first = fh.readline().strip()
         o = json.loads(first)
+        if not isinstance(o, dict):
+            return os.path.basename(path), "", os.path.getmtime(path)
         return (" ".join((o.get("description") or "").split()) or os.path.basename(path),
                 o.get("working_dir", ""), _sec(o.get("updated_at") or o.get("created_at") or
                                                 os.path.getmtime(path)))
@@ -130,6 +132,8 @@ def parse(session_id):
                     try:
                         o = json.loads(line)
                     except json.JSONDecodeError:
+                        continue
+                    if not isinstance(o, dict):
                         continue
                     role = o.get("role")
                     text = _content_text(o.get("content"))

@@ -40,12 +40,14 @@ for lay, build in (("v1", "mp"), ("v2", "sm")):
     else:
         con.execute("CREATE TABLE session_message(id TEXT,session_id TEXT,seq INT,type TEXT,data TEXT)")
         con.execute("INSERT INTO session_message VALUES('m1','s',1,'user',?)", (json.dumps({"text":"hi"}),))
-        con.execute("INSERT INTO session_message VALUES('m2','s',2,'assistant',?)", (json.dumps({"content":[{"type":"text","text":"yo"}]}),))
+        con.execute("INSERT INTO session_message VALUES('m2','s',2,'assistant',?)", (json.dumps({"content":[{"type":"reasoning","text":"hmm"},{"type":"text","text":"yo"}]}),))
     con.commit(); con.close()
     opencode._DATA = od
     m = opencode.parse(opencode.discover()[0]["id"])
     ck(f"opencode {lay} parse", m and m[0]["text"]=="hi", str(m))
-    if lay=="v2": ck("opencode v2 assistant array-content", len(m)==2 and m[1]["text"]=="yo", str(m))
+    if lay=="v2":
+        ck("opencode v2 assistant array-content", any(x["role"]=="assistant" and x["text"]=="yo" for x in m), str(m))
+        ck("opencode v2 reasoning as thinking", any(x["role"]=="thinking" and x["text"]=="hmm" for x in m), str(m))
 
 # Goose: RFC3339 text timestamps
 gd = os.path.join(TMP, "goose", "sessions"); os.makedirs(gd, exist_ok=True)
@@ -77,15 +79,21 @@ cline._BASES = [os.path.join(TMP, "clb")]
 d = cline.discover("saoudrizwan.claude-dev"); m = cline.parse(d[0]["id"])
 ck("cline title + strip", d[0]["title"]=="Title here" and "task" not in m[0]["text"].lower())
 
-# Copilot: jsonl Push(list)+truncate replay
+# Copilot: jsonl replay — truncate-only(no v), append(list), later Set(title)
 cp = os.path.join(TMP, "vsc", "workspaceStorage", "h", "chatSessions"); os.makedirs(cp, exist_ok=True)
 w(os.path.join(cp, "s.jsonl"), "\n".join(json.dumps(x) for x in [
-    {"kind":0,"v":{"customTitle":"T","creationDate":1,"requests":[{"message":{"text":"q1"},"response":[{"value":"a1"}]}]}},
-    {"kind":2,"k":["requests"],"v":[{"message":{"text":"q2"},"response":[{"value":"a2"}]}]},
-    {"kind":2,"k":["requests"],"i":2}]))   # truncate-only: no v, drops nothing here
+    {"kind":0,"v":{"customTitle":"T","creationDate":1,"requests":[
+        {"message":{"text":"q1"},"response":[{"value":"a1"}]},
+        {"message":{"text":"junk"},"response":[{"value":"junk"}]}]}},
+    {"kind":2,"k":["requests"],"i":1},                       # truncate to 1 (drop junk turn)
+    {"kind":2,"k":["requests"],"v":[{"message":{"text":"q2"},"response":[{"value":"a2"}]}]},  # append q2
+    {"kind":1,"k":["customTitle"],"v":"Renamed"}]))          # later Set of the title
 copilot._BASES = [os.path.join(TMP, "vsc")]
+data = copilot._load(copilot.discover()[0]["id"])
+ck("copilot truncate-only drops element (no stray None)", len(data["requests"])==2, len(data["requests"]))
 m = copilot.parse(copilot.discover()[0]["id"])
-ck("copilot mutation replay", [x["text"] for x in m]==["q1","a1","q2","a2"], str([x["text"] for x in m]))
+ck("copilot final turns", [x["text"] for x in m]==["q1","a1","q2","a2"], str([x["text"] for x in m]))
+ck("copilot later Set updates title", copilot.discover()[0]["title"]=="Renamed", copilot.discover()[0]["title"])
 
 # Pi PI_CODING_AGENT_DIR → <dir>/sessions (not <dir>/agent/sessions)
 os.environ["PI_CODING_AGENT_DIR"] = os.path.join(TMP, "piagent")

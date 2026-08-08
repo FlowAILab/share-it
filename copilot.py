@@ -113,19 +113,33 @@ def _head_meta(path):
     WITHOUT replaying the whole mutation log (that's parse()'s job)."""
     try:
         if path.endswith(".jsonl"):
+            title = wd = ""
+            is_sess = False
             with open(path, errors="ignore") as fh:
                 for line in fh:
                     line = line.strip()
                     if not line:
                         continue
-                    o = json.loads(line)
+                    try:
+                        o = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
                     if not isinstance(o, dict):
-                        return "", "", False
-                    v = o.get("v") if o.get("kind") == 0 else o
-                    if isinstance(v, dict):
-                        return (v.get("customTitle") or v.get("computedTitle") or "",
-                                _clean(v.get("workingDirectory")), "requests" in v)
-                    return "", "", False
+                        continue
+                    if o.get("kind") == 0 and isinstance(o.get("v"), dict):
+                        v = o["v"]
+                        title = v.get("customTitle") or v.get("computedTitle") or ""
+                        wd = _clean(v.get("workingDirectory"))
+                        is_sess = is_sess or "requests" in v
+                    elif o.get("kind") == 1:      # Set — watch the two metadata keys
+                        k = o.get("k") or []
+                        if k == ["customTitle"] and isinstance(o.get("v"), str):
+                            title = o["v"]
+                        elif k == ["workingDirectory"] and isinstance(o.get("v"), str):
+                            wd = _clean(o["v"])
+                    elif "requests" in o:
+                        is_sess = True
+            return title, wd, is_sess
         with open(path, errors="ignore") as fh:
             head = fh.read(65536)
         import re as _re
