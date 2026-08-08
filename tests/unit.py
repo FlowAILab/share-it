@@ -215,11 +215,19 @@ def main():
     check("annotations SURVIVE an index-cache clear",
           appmod._cache["/fx/s.jsonl"].get("arts") == 2
           and appmod._cache["/fx/s.jsonl"]["art_list"][0]["name"] == "a.md")
-    stale = {"path": "/fx/s.jsonl", "mtime": 9.0, "size": 100,
-             "source": "claude", "subagent": False}
-    appmod._cache = {"/fx/s.jsonl": stale}
+    # live sessions: a recently-stale annotation (≤10min behind) still SHOWS
+    # (the worker recomputes it), but an ancient one never does
+    recent = {"path": "/fx/s.jsonl", "mtime": 9.0, "size": 100,
+              "source": "claude", "subagent": False}
+    appmod._cache = {"/fx/s.jsonl": recent}
     appmod._merge_annotations()
-    check("changed files invalidate annotations", "art_list" not in stale)
+    check("recently-changed files keep stale annotations visible",
+          "art_list" in recent)
+    ancient = {"path": "/fx/s.jsonl", "mtime": 5000.0, "size": 100,
+               "source": "claude", "subagent": False}
+    appmod._cache = {"/fx/s.jsonl": ancient}
+    appmod._merge_annotations()
+    check("long-changed files invalidate annotations", "art_list" not in ancient)
 
 
     # regression: codex generated-image artifacts must carry mtime (share

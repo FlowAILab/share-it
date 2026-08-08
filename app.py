@@ -89,11 +89,17 @@ def _apply_annot(ent, rec):
 
 
 def _merge_annotations():
-    """Attach stored annotations to cache entries whose file hasn't changed."""
+    """Attach stored annotations to cache entries.
+
+    A LIVE session grows faster than the annotator — an exact mtime match would
+    keep its file list permanently invisible. A slightly-stale annotation (≤10
+    min behind) still shows; the worker catches up within its 120s cycle."""
     for path, ent in _cache.items():
         rec = _annot.get(path)
-        if (rec and rec["mtime"] == ent["mtime"] and rec["v"] == ANNOT_VERSION
-                and rec.get("cwd", "") == (ent.get("cwd") or "")):
+        if (rec and rec["v"] == ANNOT_VERSION
+                and rec.get("cwd", "") == (ent.get("cwd") or "")
+                and (rec["mtime"] == ent["mtime"]
+                     or ent["mtime"] - rec["mtime"] <= 600)):
             _apply_annot(ent, rec)
 
 
@@ -955,7 +961,9 @@ def _artifact_counter():
             _merge_annotations()
             todo = [dict(e) for e in _cache.values()
                     if not e.get("subagent")
-                    and (("art_list" not in e) or e.get("annot_v") != ANNOT_VERSION)]
+                    and (("art_list" not in e) or e.get("annot_v") != ANNOT_VERSION
+                         # stale-merged live sessions still need a recompute
+                         or (_annot.get(e["path"]) or {}).get("mtime") != e["mtime"])]
             prio = list(_annot_priority)
             _annot_priority.clear()
         if not todo and not prio:

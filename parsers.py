@@ -98,7 +98,7 @@ def _is_claude_subagent_file(path):
 
 # Inline media limits: enough for screenshots/pastes, never a transcript bomb.
 MEDIA_MAX_ONE = 5_000_000       # b64 chars per image (~3.7MB decoded)
-MEDIA_MAX_PER_SESSION = 24
+MEDIA_MAX_PER_SESSION = 40
 
 # Codex wraps pasted images in <image src="/Users/…/x.png"> markers — local
 # paths leak usernames, so exports must never carry them.
