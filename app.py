@@ -286,6 +286,10 @@ def _effective_files(session, opts):
                        if not any(a["path"] == r["path"] for a in arts)]
         fset = set(chosen)
         picked = [a for a in pool if a["path"] in fset]
+        missing = fset - {a["path"] for a in picked}
+        if missing:
+            names = ", ".join(os.path.basename(p) for p in sorted(missing)[:4])
+            raise ValueError(f"selected file(s) no longer found: {names} — refresh and retry")
         too_big = [a["name"] for a in picked
                    if (a.get("size") or 0) > parsers.ARTIFACT_MAX_BYTES]
         if too_big:
@@ -678,12 +682,6 @@ class Handler(BaseHTTPRequestHandler):
                 md = _render_index(session, messages, opts, artifact_links,
                                    stats, reads, media_base=None)
                 return self._json({"markdown": md, "card": card})
-            n_obj = 1 + len(media_objs) + len(fobjs)
-            total = sum(len(o["data"]) for o in media_objs + fobjs)
-            if n_obj > 64:
-                return self._json({"error": f"too many objects for one share ({n_obj}/64) — drop some files"}, 400)
-            if total > 100_000_000:
-                return self._json({"error": "share exceeds the 100MB bundle cap — drop some files"}, 400)
             try:
                 bundle_id = share.new_bundle_id()
                 media_base = share._hosted_config()["url"].rstrip("/") + f"/b/{bundle_id}"
@@ -693,6 +691,14 @@ class Handler(BaseHTTPRequestHandler):
                       else "text/markdown; charset=utf-8")
                 objects = ([{"name": index_name, "data": doc.encode(), "content_type": ct}]
                            + media_objs + fobjs)
+                # preflight the REAL bundle (index included) before any upload
+                if len(objects) > 64:
+                    return self._json({"error": f"too many objects for one share ({len(objects)}/64) — drop some files"}, 400)
+                over = [o["name"] for o in objects if len(o["data"]) > 25_000_000]
+                if over:
+                    return self._json({"error": f"too large to share (25MB cap): {', '.join(over)}"}, 413)
+                if sum(len(o["data"]) for o in objects) > 100_000_000:
+                    return self._json({"error": "share exceeds the 100MB bundle cap — drop some files"}, 400)
                 result = share.upload_bundle(objects, index_name,
                                              expires_hours=opts["expires_hours"],
                                              bundle_id=bundle_id)
@@ -706,37 +712,53 @@ class Handler(BaseHTTPRequestHandler):
                                "provider": entry["provider"], "expires": entry["expires"],
                                "n_files": len(shared_paths), "n_images": len(media_objs)})
         if route == "/api/copy_chat":
-            # everything the rich clipboard needs: html + markdown flavors of the
-            # SAME content, plus image files (metadata-stripped) and selected files
+            # human → one rich pasteboard item (html w/ data-URI images).
+            # agent/deep → a FILE bundle (session.md + images + artifacts):
+            # Chromium apps read only the first pasteboard item, and agent
+            # composers attach pasted files natively — files ARE the handoff.
             path = body.get("path", "")
             if not _allowed(path):
                 return self._json({"error": "invalid path"}, 400)
             opts = _render_opts(body)
             try:
+                import shutil
+                import time as _t
                 import media as _media
                 session = _session_entry(path)
                 adapter = adapters.by_id(session["source"])
                 messages = adapter.parse(path)
                 files = _effective_files(session, opts) if opts.get("artifacts") else []
                 media_objs = _media.collect(messages)
-                exp_dir = os.path.expanduser("~/.shareit/exports/clip")
-                os.makedirs(exp_dir, exist_ok=True)
-                img_paths = []
-                for m in media_objs:
-                    p = os.path.join(exp_dir, m["name"])
-                    with open(p, "wb") as fh:
-                        fh.write(m["data"])
-                    img_paths.append(p)
-                include_tools = opts["mode"] != "human"
+                n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
+                             and ((m.get("text") or "").strip() or m.get("media")))
+                stats = parsers.session_stats(path, messages)
                 deep = opts["mode"] == "deep"
                 t_in, t_out = (4000, 10000) if deep else (500, 1200)
-                html = render.clipboard_html(session, messages,
-                                             include_tools=include_tools,
-                                             include_thinking=opts["thinking"],
-                                             redact_secrets=opts["redact"],
-                                             tool_input_limit=t_in,
-                                             tool_output_limit=t_out)
-                stats = parsers.session_stats(path, messages)
+                if opts["mode"] == "human":
+                    html = render.clipboard_html(session, messages,
+                                                 include_tools=False,
+                                                 include_thinking=False,
+                                                 redact_secrets=opts["redact"],
+                                                 tool_input_limit=t_in,
+                                                 tool_output_limit=t_out)
+                    md = render.render_markdown(
+                        session, messages, redact_secrets=opts["redact"],
+                        include_thinking=False, messages_only=True,
+                        tool_input_limit=t_in, tool_output_limit=t_out,
+                        stats=stats, mode="human",
+                        cwd=session.get("cwd") or None)
+                    return self._json({"kind": "rich", "html": html, "markdown": md,
+                                       "messages": n_msgs, "images": len(media_objs),
+                                       "files": [a["path"] for a in files
+                                                 if os.path.isfile(a["path"])]})
+                # agent/deep: file bundle
+                exp_dir = os.path.join(os.path.expanduser("~/.shareit/exports"),
+                                       f"chat-{int(_t.time())}")
+                os.makedirs(exp_dir, exist_ok=True)
+                for m in media_objs:
+                    with open(os.path.join(exp_dir, m["name"]), "wb") as fh:
+                        fh.write(m["data"])
+                reads = adapter.reads(path, cwd=session.get("cwd") or None) if deep else []
                 last_request = next((m["text"] for m in reversed(messages)
                                      if m["role"] == "user" and m["text"].strip()), "")
                 md = render.render_markdown(
@@ -745,14 +767,17 @@ class Handler(BaseHTTPRequestHandler):
                     messages_only=opts["messages_only"],
                     tool_input_limit=t_in, tool_output_limit=t_out,
                     stats=stats, mode=opts["mode"], last_request=last_request,
-                    cwd=session.get("cwd") or None)
-                n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
-                             and (m.get("text") or "").strip())
-                return self._json({"html": html, "markdown": md,
-                                   "images": img_paths,
-                                   "files": [a["path"] for a in files
-                                             if os.path.isfile(a["path"])],
-                                   "messages": n_msgs})
+                    cwd=session.get("cwd") or None, media_base=".",
+                    read_files=reads or None)
+                md_path = os.path.join(exp_dir, "session.md")
+                with open(md_path, "w") as fh:
+                    fh.write(md)
+                bundle = [md_path] + [os.path.join(exp_dir, m["name"]) for m in media_objs]
+                bundle += [a["path"] for a in files if os.path.isfile(a["path"])]
+                return self._json({"kind": "files", "files": bundle,
+                                   "messages": n_msgs, "images": len(media_objs),
+                                   "artifacts": sum(1 for a in files
+                                                    if os.path.isfile(a["path"]))})
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
         if route in ("/api/file/copy", "/api/file/reveal", "/api/file/open", "/api/file/preview"):

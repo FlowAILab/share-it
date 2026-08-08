@@ -102,10 +102,10 @@ def render_markdown(session, messages, redact_secrets=True, include_thinking=Fal
         if role in ("user", "assistant", "thinking") and not (msg.get("text") or "").strip():
             continue  # empty blocks are noise
         if role == "user":
-            lines += ["", "## User", "", _strip_base64(msg["text"])]
+            lines += ["", "## User", "", _strip_base64(_strip_image_token(msg["text"], msg) if media_base else msg["text"])]
             lines += _media_md(msg, media_base)
         elif role == "assistant":
-            lines += ["", "## Assistant", "", _strip_base64(msg["text"])]
+            lines += ["", "## Assistant", "", _strip_base64(_strip_image_token(msg["text"], msg) if media_base else msg["text"])]
             lines += _media_md(msg, media_base)
         elif role == "thinking":
             quoted = "\n".join("> " + l for l in msg["text"].splitlines())
@@ -169,28 +169,36 @@ def clipboard_html(session, messages, include_tools=False, include_thinking=Fals
             'font:12px/1.4 ui-monospace,monospace;color:#555')
     title = clean(session.get("title", ""))  # titles can carry pasted secrets too
     out = [f'<div style="{P}"><b>{_esc(title)}</b></div>']
-    for m in messages:
-        r = m["role"]
+    for m_ in messages:
+        r = m_["role"]
         if r == "thinking" and not include_thinking:
             continue
         if r == "tool":
             if not include_tools:
                 continue
-            tin = _esc(truncate_middle(clean(m.get("input") or ""), tool_input_limit))
-            tout = _esc(truncate_middle(clean(m.get("output") or ""), tool_output_limit))
-            body = f'⚙ <b>{_esc(m.get("name", "?"))}</b> {tin}'
+            tin = _esc(truncate_middle(clean(m_.get("input") or ""), tool_input_limit))
+            tout = _esc(truncate_middle(clean(m_.get("output") or ""), tool_output_limit))
+            body = f'⚙ <b>{_esc(m_.get("name", "?"))}</b> {tin}'
             if tout.strip():
                 body += f'<br>→ {tout}'
             out.append(f'<div style="{TOOL}">{body}</div>')
             continue
-        text = clean(m.get("text") or "")
-        if not text.strip():
+        text = clean(m_.get("text") or "")
+        if not text.strip() and not (m_.get("media") or []):
             continue
         who = ('You', LBL_U) if r == "user" else \
               (('Thinking', LBL_U) if r == "thinking" else ('Assistant', LBL))
-        body = _esc(text).replace("\n", "<br>")
-        out.append(f'<p style="{P}"><span style="{who[1]}">{who[0]}:</span> {body}</p>')
+        imgs = "".join(
+            f'<img src="data:{m.get("media_type", "image/png")};base64,{m["data"]}"'
+            f' style="max-width:100%;display:block;margin:6px 0;border-radius:6px" alt="pasted image">'
+            for m in msg_media(m_) if m.get("data"))
+        shown = _esc(_strip_image_token(text, m_) if imgs else text).replace("\n", "<br>")
+        out.append(f'<p style="{P}"><span style="{who[1]}">{who[0]}:</span> {shown}{imgs}</p>')
     return "".join(out)
+
+
+def msg_media(msg):
+    return msg.get("media") or []
 
 
 def _media_md(msg, media_base):
@@ -199,6 +207,13 @@ def _media_md(msg, media_base):
         return []
     return [f"\n![pasted image]({media_base}/{m['name']})"
             for m in msg.get("media") or [] if m.get("name")]
+
+
+def _strip_image_token(text, msg):
+    """Drop the bare [image] placeholder when the real image rides alongside."""
+    if any(m.get("name") for m in msg.get("media") or []):
+        return text.replace("[image]", "").strip() or ""
+    return text
 
 
 def _media_html(msg, inline=True):
@@ -374,7 +389,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
             if not (msg.get("text") or "").strip():
                 continue
             flush_steps()
-            parts.append(f'<div class="turn you"><div class="body">{_esc(clean(msg["text"]))}'
+            parts.append(f'<div class="turn you"><div class="body">{_esc(clean(_strip_image_token(msg["text"], msg) if with_media else msg["text"]))}'
                          f'{_media_html(msg, with_media)}</div></div>')
         elif role == "assistant":
             if not (msg.get("text") or "").strip():

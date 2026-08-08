@@ -696,7 +696,7 @@ def _claude_meta(path):
 
 
 def _codex_meta(path):
-    title, cwd, subagent = None, None, False
+    title, cwd, subagent, thread = None, None, False, ""
     n = 0
     for obj in _iter_jsonl(path):
         n += 1
@@ -706,6 +706,7 @@ def _codex_meta(path):
         payload = obj.get("payload") or {}
         if t == "session_meta":
             cwd = payload.get("cwd")
+            thread = payload.get("id") or ""
             src = payload.get("source")
             subagent = isinstance(src, dict) and "subagent" in src
         elif t == "response_item" and payload.get("type") == "message" and payload.get("role") == "user":
@@ -716,7 +717,7 @@ def _codex_meta(path):
         elif t == "event_msg" and payload.get("type") == "user_message" and not title:
             title = payload.get("message", "")
             break
-    return title, cwd, subagent
+    return title, cwd, subagent, thread
 
 
 def _codex_sqlite_index():
@@ -748,7 +749,7 @@ def _codex_sqlite_index():
     return index
 
 
-SCHEMA_VERSION = 4  # bump when entry shape or title/meta extraction changes
+SCHEMA_VERSION = 5  # bump when entry shape or title/meta extraction changes
 
 
 def _parse_iso_ts(iso):
@@ -814,6 +815,23 @@ def last_event_ts(path, mtime):
     return mtime
 
 
+def _codex_thread_of(path):
+    """Stable conversation id: session_meta.id (survives resumes), else the
+    filename uuid."""
+    try:
+        with open(path, errors="ignore") as fh:
+            first = fh.readline()
+        obj = json.loads(first)
+        tid = (obj.get("payload") or {}).get("id")
+        if isinstance(tid, str) and tid:
+            return tid
+    except (OSError, json.JSONDecodeError):
+        pass
+    m = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+                  os.path.basename(path))
+    return m.group(1) if m else ""
+
+
 def scan_sessions(cache):
     """Walk both roots; return list of session dicts. `cache` maps path -> entry."""
     sessions = []
@@ -852,7 +870,8 @@ def scan_sessions(cache):
                     elif os.path.realpath(path) in codex_idx:
                         title, cwd, subagent, extra = codex_idx[os.path.realpath(path)]
                     else:
-                        title, cwd, subagent = _codex_meta(path)
+                        title, cwd, subagent, _thread = _codex_meta(path)
+                        extra = {"thread": _thread}
                 except Exception:  # one unreadable/corrupt file must not break the index
                     continue
                 if source == "claude" and _is_claude_subagent_file(path):
@@ -864,7 +883,10 @@ def scan_sessions(cache):
                        "last_used": last_event_ts(path, st.st_mtime),
                        "subagent": subagent,
                        "model": extra.get("model", ""), "tokens": extra.get("tokens", 0),
-                       "branch": extra.get("branch", ""), "v": SCHEMA_VERSION}
+                       "branch": extra.get("branch", ""),
+                       "thread": (extra.get("thread") or _codex_thread_of(path))
+                                 if source == "codex" else "",
+                       "v": SCHEMA_VERSION}
                 ent["app"] = _app_for(ent, cowork_ids)
                 cache[key] = ent
                 sessions.append(ent)

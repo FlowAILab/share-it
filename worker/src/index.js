@@ -103,6 +103,8 @@ export default {
       }
       if (total > MAX_BUNDLE_BYTES)
         return Response.json({ error: `bundle exceeds ${MAX_BUNDLE_BYTES} bytes` }, { status: 413 });
+      // only the client-rendered index may be trusted (never user artifacts)
+      manifest.trusted = manifest.trusted === true ? [sanitize(manifest.index)] : [];
       manifest.hours = hours;
       manifest.committedAt = Date.now();
       const meta = {};
@@ -206,17 +208,26 @@ export default {
 
   async scheduled(_evt, env) {
     const now = Date.now();
+    const manifests = new Set();
+    const staged = [];  // bundle data objects seen this sweep
     let cursor;
     do {
       const page = await env.LINKS.list({ cursor, include: ["customMetadata"] });
       for (const o of page.objects) {
+        const bm = o.key.match(/^b\/([A-Za-z0-9_-]{16,32})\/(.+)$/);
+        if (bm && bm[2] === "manifest.json") manifests.add(bm[1]);
+        else if (bm) staged.push({ id: bm[1], key: o.key, uploaded: new Date(o.uploaded).getTime() });
         const exp = o.customMetadata?.expiresAt;
         if (!(exp && Number(exp) < now)) continue;
-        const bm = o.key.match(/^b\/([A-Za-z0-9_-]{16,32})\/manifest\.json$/);
-        if (bm) await deleteBundle(env, bm[1]);
+        if (bm && bm[2] === "manifest.json") { await deleteBundle(env, bm[1]); manifests.delete(bm[1]); }
         else if (!o.key.startsWith("b/")) await env.LINKS.delete(o.key);
       }
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor);
+    // failed-upload leftovers: staged objects with no manifest, older than a day
+    const orphans = staged.filter((o) => !manifests.has(o.id) && o.uploaded < now - 86400000)
+                          .map((o) => o.key);
+    for (let i = 0; i < orphans.length; i += 1000)
+      await env.LINKS.delete(orphans.slice(i, i + 1000));
   },
 };

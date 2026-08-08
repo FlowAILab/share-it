@@ -153,14 +153,16 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
             _bundle_call(f"/b/{bundle_id}", method="DELETE")
         except Exception:
             pass
-        raise OSError(f"{reason} — nothing was shared")
+        err = OSError(f"{reason} — nothing was shared")
+        err._shareit_final = True
+        raise err
 
     try:  # ANY transport/parse failure must roll back, not just clean non-200s
         with ThreadPoolExecutor(max_workers=6) as pool:
             failed = [f for f in pool.map(put, objects) if f]
         if failed:
             _abort(f"upload failed for: {', '.join(failed)}")
-        manifest = {"index": index_name, "hours": expires_hours,
+        manifest = {"index": index_name, "hours": expires_hours, "trusted": True,
                     "objects": [{"name": o["name"], "size": len(o["data"])} for o in objects]}
         status, body = _bundle_call(f"/bundle/{bundle_id}/commit",
                                     data=json.dumps(manifest).encode(),
@@ -170,9 +172,9 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
         out = json.loads(body)
         return {"url": out["url"], "provider": "hosted", "ref": f"b/{bundle_id}",
                 "hours": out["hours"]}
-    except OSError:
-        raise
     except Exception as e:
+        if getattr(e, "_shareit_final", False):
+            raise  # already rolled back
         _abort(f"share failed ({e.__class__.__name__})")
 
 

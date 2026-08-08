@@ -169,10 +169,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if panel.isVisible { panel.orderOut(nil) } else { showPanel() }
     }
 
+    var qlOpenedAt: TimeInterval = 0
     func windowDidResignKey(_ notification: Notification) {
-        // don't vanish beneath our own Quick Look panel (isVisible can lag the
-        // key-window switch, so existence alone must be the guard)
-        if QLPreviewPanel.sharedPreviewPanelExists() { return }
+        // don't vanish beneath our own Quick Look panel. isVisible lags the
+        // key-window switch, so a just-opened QL also counts.
+        if QLPreviewPanel.sharedPreviewPanelExists(),
+           QLPreviewPanel.shared().isVisible
+           || Date().timeIntervalSince1970 - qlOpenedAt < 1.5 { return }
         panel.orderOut(nil)
     }
 
@@ -223,6 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             items.append(contentsOf: files as [NSPasteboardWriting])
             pb.writeObjects(items)
         case "quickLook":
+            qlOpenedAt = Date().timeIntervalSince1970
             qlFiles = files
             if let ql = QLPreviewPanel.shared() {
                 ql.dataSource = self
