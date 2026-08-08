@@ -18,6 +18,9 @@ def _sessions_dir():
     cands += [os.path.expanduser("~/.local/share/goose/sessions"),
               os.path.expanduser("~/Library/Application Support/goose/sessions"),
               os.path.expanduser("~/Library/Application Support/Block/goose/sessions")]
+    for c in cands:   # prefer a dir that actually holds sessions
+        if os.path.isfile(os.path.join(c, "sessions.db")) or glob.glob(os.path.join(c, "*.jsonl")):
+            return c
     for c in cands:
         if os.path.isdir(c):
             return c
@@ -76,6 +79,12 @@ def discover():
 
 
 def _sec(t):
+    if isinstance(t, str):                     # SQLx binds TIMESTAMP as RFC3339 text
+        try:
+            import datetime as _dt
+            return _dt.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0
     t = t or 0
     return t / 1000.0 if t > 1e11 else t
 

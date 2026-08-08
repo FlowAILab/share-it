@@ -13,7 +13,15 @@ import glob
 import json
 import os
 
-ROOT = os.path.expanduser("~/.pi/agent/sessions")
+def _root():
+    env = os.environ.get("PI_CODING_AGENT_SESSION_DIR")
+    if env:
+        return os.path.expanduser(env)
+    base = os.environ.get("PI_CODING_AGENT_DIR") or "~/.pi"
+    return os.path.join(os.path.expanduser(base), "agent", "sessions")
+
+
+ROOT = _root()
 
 
 def available():
@@ -47,7 +55,7 @@ def _split_blocks(content):
 
 def _header(path):
     """(cwd, title, ts) from the first line + any session_info name."""
-    cwd = title = ""
+    cwd = title = first_user = ""
     ts = os.path.getmtime(path) if os.path.isfile(path) else 0
     try:
         with open(path, errors="ignore") as fh:
@@ -65,9 +73,14 @@ def _header(path):
                     cwd = o.get("cwd", "") or ""
                 elif o.get("type") == "session_info" and o.get("name"):
                     title = o["name"]
+                elif (not first_user and o.get("type") == "message"
+                      and (o.get("message") or {}).get("role") == "user"):
+                    txt, _ = _split_blocks((o.get("message") or {}).get("content"))
+                    if txt.strip():
+                        first_user = " ".join(txt.split())[:120]
     except OSError:
         pass
-    return cwd, title, ts
+    return cwd, title or first_user, ts
 
 
 def discover():
@@ -76,8 +89,6 @@ def discover():
     out = []
     for path in _files():
         cwd, title, ts = _header(path)
-        if not title:  # fall back to the first user line
-            title = _first_user(path)
         mt = os.path.getmtime(path) if os.path.isfile(path) else ts
         out.append({"id": path, "title": title or "(untitled)",
                     "cwd": cwd, "ts": mt})

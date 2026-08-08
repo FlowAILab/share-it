@@ -94,17 +94,18 @@ def parse(session_id):
     msgs = []
     try:
         tables = _tables(con)
-        if not {"message", "part"} <= tables:
+        if not tables & {"message", "part", "session_message"}:
             return []
         roles = {}
-        for mid, data in con.execute(
-                "SELECT id, data FROM message WHERE session_id = ? ORDER BY id", (sid,)):
-            try:
-                roles[mid] = (json.loads(data) or {}).get("role")
-            except (json.JSONDecodeError, TypeError):
-                roles[mid] = None
-        for mid, data in con.execute(
-                "SELECT message_id, data FROM part WHERE session_id = ? ORDER BY id", (sid,)):
+        if {"message", "part"} <= tables:
+            for mid, data in con.execute(
+                    "SELECT id, data FROM message WHERE session_id = ? ORDER BY id", (sid,)):
+                try:
+                    roles[mid] = (json.loads(data) or {}).get("role")
+                except (json.JSONDecodeError, TypeError):
+                    roles[mid] = None
+        for mid, data in ([] if "part" not in tables else con.execute(
+                "SELECT message_id, data FROM part WHERE session_id = ? ORDER BY id", (sid,))):
             text, kind = _part_text(data)
             if not text.strip():
                 continue
@@ -115,17 +116,26 @@ def parse(session_id):
                 msgs.append({"role": "assistant" if kind != "thinking" else "thinking",
                              "text": text})
         if not msgs and "session_message" in tables:   # v2 layout (best-effort)
-            for data, in con.execute(
-                    "SELECT data FROM session_message WHERE session_id = ? ORDER BY id", (sid,)):
+            cols = {r[1] for r in con.execute("PRAGMA table_info(session_message)")}
+            order = "seq" if "seq" in cols else "rowid"
+            sel = ("type, data" if "type" in cols else "data") + f" FROM session_message WHERE session_id = ? ORDER BY {order}"
+            for row in con.execute(f"SELECT {sel}", (sid,)):
+                rtype, data = (row[0], row[1]) if "type" in cols else (None, row[0])
                 try:
                     d = json.loads(data) if isinstance(data, (str, bytes)) else data
                 except (json.JSONDecodeError, TypeError):
                     continue
                 if not isinstance(d, dict):
                     continue
-                role = d.get("role")
-                text = "".join(p.get("text", "") for p in (d.get("parts") or [])
-                               if isinstance(p, dict) and p.get("type") == "text") or d.get("text", "")
+                role = d.get("role") or rtype
+                # text lives under data.text (user), data.content (assistant),
+                # or data.parts[].text depending on version
+                text = d.get("text") or ""
+                if not text and isinstance(d.get("content"), str):
+                    text = d["content"]
+                if not text:
+                    text = "".join(p.get("text", "") for p in (d.get("parts") or [])
+                                   if isinstance(p, dict) and p.get("type") == "text")
                 if text.strip() and role in ("user", "assistant"):
                     msgs.append({"role": role, "text": text})
     except sqlite3.Error:

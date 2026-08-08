@@ -47,13 +47,14 @@ def _apply(base, path, value, kind, index):
     try:
         if kind == 1:            # Set
             node[last] = value
-        elif kind == 2:          # Push (append, or insert at index)
-            node.setdefault(last, []) if isinstance(node, dict) else None
+        elif kind == 2:          # Push: v is a LIST; with i, truncate to i then extend
+            if isinstance(node, dict) and not isinstance(node.get(last), list):
+                node[last] = []
             target = node[last]
-            if index is None:
-                target.append(value)
-            else:
-                target.insert(index, value)
+            vals = value if isinstance(value, list) else [value]
+            if index is not None:
+                del target[index:]
+            target.extend(vals)
         elif kind == 3:          # Delete
             if isinstance(node, dict):
                 node.pop(last, None)
@@ -105,19 +106,42 @@ def _workspace_cwd(path):
         return ""
 
 
+def _head_meta(path):
+    """(title, creationDate) cheaply — the flat json head, or the .jsonl Initial
+    line — WITHOUT replaying the whole mutation log (that's for parse())."""
+    try:
+        if path.endswith(".jsonl"):
+            with open(path, errors="ignore") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    o = json.loads(line)
+                    v = o.get("v") if o.get("kind") == 0 else o
+                    if isinstance(v, dict):
+                        return v.get("customTitle") or v.get("computedTitle") or "", v.get("creationDate") or 0, "requests" in v
+                    return "", 0, False
+        with open(path, errors="ignore") as fh:
+            head = fh.read(8192)
+        import re as _re
+        t = _re.search(r'"(?:customTitle|computedTitle)"\s*:\s*"((?:[^"\\]|\\.){0,200})"', head)
+        has = '"requests"' in head
+        return (json.loads(f'"{t.group(1)}"') if t else ""), 0, has
+    except (OSError, json.JSONDecodeError, ValueError):
+        return "", 0, False
+
+
 def discover():
     if not available():
         return []
     out = []
     for path in _session_files():
-        data = _load(path)
-        if not isinstance(data, dict) or "requests" not in data:
+        title, _cd, has = _head_meta(path)
+        if not has:
             continue
-        title = data.get("customTitle") or data.get("computedTitle") or ""
-        cwd = _workspace_cwd(path) or _clean(data.get("workingDirectory"))
-        ts = os.path.getmtime(path) if os.path.isfile(path) else (data.get("creationDate") or 0) / 1000.0
+        ts = os.path.getmtime(path) if os.path.isfile(path) else 0
         out.append({"id": path, "title": " ".join(str(title).split()),
-                    "cwd": cwd, "ts": ts})
+                    "cwd": _workspace_cwd(path), "ts": ts})
     return out
 
 

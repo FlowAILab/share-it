@@ -33,9 +33,13 @@ def _task_dirs(extid):
 
 
 def available(extid):
-    return any(os.path.isdir(os.path.join(b, extid, "tasks")) for b in _BASES) \
-        or (extid == "saoudrizwan.claude-dev"
-            and os.path.isdir(os.path.expanduser("~/.cline/data/tasks")))
+    if any(os.path.isdir(os.path.join(b, extid, "tasks")) for b in _BASES):
+        return True
+    if extid == "saoudrizwan.claude-dev":
+        alt = os.path.join(os.environ.get("CLINE_DATA_DIR")
+                           or os.path.expanduser("~/.cline/data"), "tasks")
+        return os.path.isdir(alt)
+    return False
 
 
 def _title(task_dir):
@@ -62,7 +66,13 @@ def discover(extid):
     out = []
     for d in _task_dirs(extid):
         tid = os.path.basename(d)
-        ts = os.path.getmtime(d)   # dir mtime reflects the latest write
+        ts = 0   # newest of the task's data files (in-place edits don't touch the dir)
+        for f in ("api_conversation_history.json", "ui_messages.json"):
+            try:
+                ts = max(ts, os.path.getmtime(os.path.join(d, f)))
+            except OSError:
+                pass
+        ts = ts or os.path.getmtime(d)
         out.append({"id": d, "title": _title(d), "cwd": "", "ts": ts})
     return out
 

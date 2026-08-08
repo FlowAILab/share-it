@@ -963,21 +963,28 @@ def scan_sessions(cache):
             except Exception:
                 continue  # a broken client never suppresses the others
             for d in found:
-                ent = cache.get(d["id"])
-                if ent is not None and ent.get("v") != SCHEMA_VERSION:
-                    ent = None  # old-schema entry (e.g. fake time.time() stamp) — rebuild
-                if ent is None:
-                    # the harness's own timestamp, or 0 — never time.time(), which
-                    # would fake-freshen every undated session on every scan
+                try:  # one malformed descriptor must not drop the whole client
+                    did = d["id"]
+                    title = " ".join(str(d.get("title") or "(untitled)").split())[:120] or "(untitled)"
+                    cwd = str(d.get("cwd") or "")
                     ts = d.get("ts") or 0
-                    ent = {"path": d["id"], "source": ad.id, "app": ad.id,
-                           "title": (d.get("title") or "(untitled)")[:120],
-                           "cwd": d.get("cwd", ""), "project": os.path.basename(d.get("cwd", "")),
+                    if not isinstance(ts, (int, float)):
+                        ts = 0
+                except Exception:
+                    continue
+                ent = cache.get(did)
+                if ent is not None and ent.get("v") != SCHEMA_VERSION:
+                    ent = None  # old-schema entry — rebuild
+                if ent is None:
+                    ent = {"path": did, "source": ad.id, "app": ad.id, "title": title,
+                           "cwd": cwd, "project": os.path.basename(cwd),
                            "mtime": ts, "size": 0, "last_used": ts, "subagent": False,
                            "model": "", "tokens": 0, "branch": "", "v": SCHEMA_VERSION}
-                    cache[d["id"]] = ent
-                elif d.get("ts"):
-                    ent["last_used"] = ent["mtime"] = d["ts"]  # cursor keeps updating
+                    cache[did] = ent
+                else:  # refresh metadata that can change (rename, workspace, mtime)
+                    ent["title"], ent["cwd"], ent["project"] = title, cwd, os.path.basename(cwd)
+                    if ts:
+                        ent["last_used"] = ent["mtime"] = ts
                 sessions.append(ent)
     except Exception:
         pass
