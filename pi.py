@@ -17,8 +17,9 @@ def _root():
     env = os.environ.get("PI_CODING_AGENT_SESSION_DIR")
     if env:
         return os.path.expanduser(env)
-    base = os.environ.get("PI_CODING_AGENT_DIR") or "~/.pi"
-    return os.path.join(os.path.expanduser(base), "agent", "sessions")
+    # PI_CODING_AGENT_DIR overrides the agent dir itself (default ~/.pi/agent)
+    agent = os.environ.get("PI_CODING_AGENT_DIR") or "~/.pi/agent"
+    return os.path.join(os.path.expanduser(agent), "sessions")
 
 
 ROOT = _root()
@@ -69,6 +70,8 @@ def _header(path):
                     o = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(o, dict):
+                    continue
                 if o.get("type") == "session" and not cwd:
                     cwd = o.get("cwd", "") or ""
                 elif o.get("type") == "session_info" and o.get("name"):
@@ -116,6 +119,8 @@ def parse(path):
                 try:
                     o = json.loads(line)
                 except json.JSONDecodeError:
+                    continue
+                if not isinstance(o, dict):
                     continue
                 eid = o.get("id")
                 if eid is not None:

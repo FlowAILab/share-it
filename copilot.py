@@ -51,7 +51,7 @@ def _apply(base, path, value, kind, index):
             if isinstance(node, dict) and not isinstance(node.get(last), list):
                 node[last] = []
             target = node[last]
-            vals = value if isinstance(value, list) else [value]
+            vals = value if isinstance(value, list) else ([] if value is None else [value])
             if index is not None:
                 del target[index:]
             target.extend(vals)
@@ -78,6 +78,8 @@ def _load(path):
                     try:
                         o = json.loads(line)
                     except json.JSONDecodeError:
+                        continue
+                    if not isinstance(o, dict):
                         continue
                     kind = o.get("kind")
                     if kind == 0 and isinstance(o.get("v"), dict):
@@ -107,8 +109,8 @@ def _workspace_cwd(path):
 
 
 def _head_meta(path):
-    """(title, creationDate) cheaply — the flat json head, or the .jsonl Initial
-    line — WITHOUT replaying the whole mutation log (that's for parse())."""
+    """(title, wd, is_session) cheaply — flat-json head or the .jsonl Initial line,
+    WITHOUT replaying the whole mutation log (that's parse()'s job)."""
     try:
         if path.endswith(".jsonl"):
             with open(path, errors="ignore") as fh:
@@ -117,18 +119,23 @@ def _head_meta(path):
                     if not line:
                         continue
                     o = json.loads(line)
+                    if not isinstance(o, dict):
+                        return "", "", False
                     v = o.get("v") if o.get("kind") == 0 else o
                     if isinstance(v, dict):
-                        return v.get("customTitle") or v.get("computedTitle") or "", v.get("creationDate") or 0, "requests" in v
-                    return "", 0, False
+                        return (v.get("customTitle") or v.get("computedTitle") or "",
+                                _clean(v.get("workingDirectory")), "requests" in v)
+                    return "", "", False
         with open(path, errors="ignore") as fh:
-            head = fh.read(8192)
+            head = fh.read(65536)
         import re as _re
         t = _re.search(r'"(?:customTitle|computedTitle)"\s*:\s*"((?:[^"\\]|\\.){0,200})"', head)
-        has = '"requests"' in head
-        return (json.loads(f'"{t.group(1)}"') if t else ""), 0, has
+        wd = _re.search(r'"workingDirectory"\s*:\s*"((?:[^"\\]|\\.){0,400})"', head)
+        # a file living in chatSessions/ IS a chat session regardless of head window
+        return ((json.loads(f'"{t.group(1)}"') if t else ""),
+                _clean(json.loads(f'"{wd.group(1)}"')) if wd else "", True)
     except (OSError, json.JSONDecodeError, ValueError):
-        return "", 0, False
+        return "", "", False
 
 
 def discover():
@@ -136,12 +143,12 @@ def discover():
         return []
     out = []
     for path in _session_files():
-        title, _cd, has = _head_meta(path)
-        if not has:
+        title, wd, is_sess = _head_meta(path)
+        if not is_sess:
             continue
         ts = os.path.getmtime(path) if os.path.isfile(path) else 0
         out.append({"id": path, "title": " ".join(str(title).split()),
-                    "cwd": _workspace_cwd(path), "ts": ts})
+                    "cwd": _workspace_cwd(path) or wd, "ts": ts})
     return out
 
 

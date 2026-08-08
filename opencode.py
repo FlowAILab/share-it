@@ -131,8 +131,12 @@ def parse(session_id):
                 # text lives under data.text (user), data.content (assistant),
                 # or data.parts[].text depending on version
                 text = d.get("text") or ""
-                if not text and isinstance(d.get("content"), str):
-                    text = d["content"]
+                c = d.get("content")
+                if not text and isinstance(c, str):
+                    text = c
+                if not text and isinstance(c, list):    # v2 assistant: block array
+                    text = "".join(b.get("text", "") for b in c
+                                   if isinstance(b, dict) and b.get("type") == "text")
                 if not text:
                     text = "".join(p.get("text", "") for p in (d.get("parts") or [])
                                    if isinstance(p, dict) and p.get("type") == "text")
