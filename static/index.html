@@ -159,6 +159,22 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .mhdr { font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
   color: var(--faint); padding: 7px 12px 3px; }
 .paysum { font-size: 11px; color: var(--faint); padding: 2px 0 0; }
+.peekbox { border: 1px solid var(--hair); background: rgba(255,255,255,0.025);
+  border-radius: 10px; padding: 8px 10px 9px; }
+.chathdr { display: flex; align-items: center; justify-content: space-between;
+  font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 6px; }
+.copychip { cursor: pointer; text-transform: none; letter-spacing: 0;
+  font-size: 11px; color: var(--dim); border: 1px solid var(--hair);
+  border-radius: 6px; padding: 1px 7px; }
+.copychip:hover { color: var(--ink); background: var(--fill); }
+.copychip kbd { font-size: 10px; }
+.actbtn { cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  font: 500 11.5px -apple-system, system-ui; color: var(--dim);
+  background: var(--fill); border: 1px solid var(--hair); border-radius: 8px;
+  padding: 4px 11px; }
+.actbtn:hover { color: var(--ink); background: rgba(255,255,255,0.09); }
+.actbtn .applogo { display: inline-flex; width: 12px; height: 12px; }
 .art .selmark { color: #7fc97f; font-weight: 700; margin-right: 1px; }
 .art:focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
 .morechips:hover { color: var(--ink); }
@@ -258,7 +274,7 @@ function smartCopy() {
   const vis = visible();
   const s = vis.find((x) => x.path === expanded) || vis[sel];
   if (!s) return false;
-  if (expanded === s.path && s._sel?.size) {  // chips selected → real files
+  if (expanded === s.path && s._selTouched && s._sel?.size) {  // user picked files → copy those
     const files = [...s._sel];
     if (nativeCmd("copyFiles", files))
       toast(`Copied ${files.length} file${files.length > 1 ? "s" : ""} — paste in Finder or any app`);
@@ -358,7 +374,7 @@ function menuItemsFor(s) {
 function copyFilesOnly(s, fp) {
   if (!nativeCmd("copyFiles", fp))
     api("/api/file/copy", {path: s.path, files: fp}).catch((e) => toast(e.message));
-  toast(`${fp.length} file${fp.length > 1 ? "s" : ""} copied — paste anywhere`);
+  toast(`Copied ${fp.length} file${fp.length > 1 ? "s" : ""} — paste anywhere`);
 }
 
 async function copyLastCode(s) {
@@ -646,7 +662,8 @@ function renderList() {
     : `<span class="brand">Share-It</span><span class="fdiv">${tally}</span>
      <span class="grow"></span><span>${(() => {
        const ex = vis.find((x) => x.path === expanded);
-       if (ex?._sel?.size) return `<kbd>⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌥click</kbd> reveal in Finder`;
+       if (ex?._selTouched && ex?._sel?.size) return `<kbd>⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌥click</kbd> reveal in Finder`;
+       if (ex?._sel?.size) return `<kbd>⌘C</kbd> copy chat · <kbd>⇧⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""}`;
        {
          const cur = vis[sel];
          const openHint = cur && openTargetFor(cur) ? ` · <kbd>⌥⏎</kbd> open in ${openTargetFor(cur)}` : "";
@@ -704,6 +721,7 @@ $("#list").addEventListener("click", (ev) => {
     s._sel.has(art.dataset.art) ? s._sel.delete(art.dataset.art) : s._sel.add(art.dataset.art);
     return render();
   }
+  if (t.closest("#chat-copy")) return void copyChat(s);
   if (t.closest("#chips-more")) { s._chipsOpen = !s._chipsOpen; render(); return; }
   if (t.closest("#art-all")) {
     const p = peekCache[s.path];
@@ -802,9 +820,11 @@ function cardHtml(s) {
   const lastTxt = p && p.last && !(p.messages.slice(0, 3).some((m) => m.text === p.last)) ? p.last : "";
   const lastBlock = lastTxt ? `<div class="gap" title="conversation continues">⋯</div>
     <div class="msg a last"><i class="${roleCls}">${appShort(s)}</i><span title="this is what ⧉ copy last answer copies">${hi(lastTxt)}</span></div>` : "";
-  const peek = !p ? '<div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div>'
-    : `<div class="peek">${head + lastBlock
-      || '<div class="msg"><span class="share-meta">no readable messages</span></div>'}</div>`;
+  const chatHdr = `<div class="chathdr"><span>chat</span>
+    <span role="button" tabindex="0" class="copychip" id="chat-copy" title="copy the whole conversation — pastes formatted in Slack/Mail, markdown in editors">copy <kbd>⌘C</kbd></span></div>`;
+  const peek = !p ? '<div class="peekbox"><div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div></div>'
+    : `<div class="peekbox">${chatHdr}<div class="peek">${head + lastBlock
+      || '<div class="msg"><span class="share-meta">no readable messages</span></div>'}</div></div>`;
   s._sel = s._sel || new Set();
   const chip = (a, cls) => {
     const st = (s._art || {})[a.path];
@@ -842,7 +862,7 @@ function cardHtml(s) {
   const nAll = (p?.artifacts || []).length + (p?.reads || []).length;
   const arts = groups.length ? `<div class="ctl arts">${groups.join("")}
     ${nAll > 1 ? `<span role="button" tabindex="0" class="tog" id="art-all" title="${nSel === nAll ? "unselect all" : "select every file"}">${nSel === nAll ? "none" : "all"}</span>` : ""}
-    ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⌘C</kbd></button>
+    ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⇧⌘C</kbd></button>
       <button class="share small" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"} ⏎</button>` : ""}
   </div>` : "";
   const expLbl = {0: "no expiry", 24: "1d", 72: "3d", 168: "7d"}[opts.expiry] || "no expiry";
@@ -851,9 +871,9 @@ function cardHtml(s) {
     opts.redact ? "text scrubbed" : "not scrubbed"}${
     (p.artifacts || []).length || (p.reads || []).length ? "" : ""}</div>` : "";
   const openTarget = openTargetFor(s);
-  const resume = `<div class="ctl">${openTarget ? `<span class="tog resume openin" id="resume"
-    title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</span>` : ""}
-    <span class="tog resume" id="last-answer" title="copy the final assistant response (⇧⌘C)">⧉ copy last answer</span></div>`;
+  const resume = `<div class="ctl">${openTarget ? `<button class="actbtn" id="resume"
+    title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</button>` : ""}
+    <button class="actbtn" id="last-answer" title="copy the final assistant response">⧉ Copy last answer</button></div>`;
   const st = s._share;
   const linkGlyph = '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5 7l3.5-3.5M4 5H2.8A1.8 1.8 0 0 0 2.8 8.6H4M8 3.4h1.2a1.8 1.8 0 0 1 0 3.6H8"/></svg>';
   const link = st && st.url ? `
@@ -1214,7 +1234,10 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     const s = vis[sel];
     if (!s) return;
-    const files = [...(s.art_list || []), ...(s.read_list || [])].map((f) => f.path);
+    const p = peekCache[s.path];
+    const files = s._sel?.size ? [...s._sel]
+      : p?.primary?.length ? p.primary
+      : [...(s.art_list || []), ...(s.read_list || [])].map((f) => f.path);
     if (files.length) copyFilesOnly(s, files);
     else copyLastAnswer(s);
   }
