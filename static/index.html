@@ -83,11 +83,18 @@ body.browser #panel {
 /* expansion */
 .card { margin: 2px 6px 8px 34px; padding: 10px 12px; border-left: 1px solid var(--hair);
         display: flex; flex-direction: column; gap: 10px; }
-.peek { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; }
+.peek { display: flex; flex-direction: column; gap: 5px; font-size: 13px; line-height: 1.5; }
+.peek .msg { display: flex; gap: 8px; align-items: baseline; }
+.peek .msg.u i { color: var(--faint); }
+.peek .msg.a i { color: #d9825f; opacity: 0.85; }
+.peek .msg.a span { color: var(--dim); }
+.peek .msg.u span { color: var(--ink); }
+.peek .msg.last span { color: var(--ink); }
+.peek .gap { color: var(--faint); font-size: 11px; padding-left: 32px; line-height: 0.8; }
 .peek div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             color: rgba(255,255,255,0.68); display: flex; gap: 8px; }
 .peek div > span { overflow: hidden; text-overflow: ellipsis; }
-.peek i { font-style: normal; flex: none; width: 24px; font-size: 10.5px; letter-spacing: 0.06em;
+.peek i { font-style: normal; flex: none; width: 42px; font-size: 10.5px; letter-spacing: 0.06em;
           text-transform: uppercase; color: var(--dim); padding-top: 2px; }
 .peek b { color: var(--ink); font-weight: 600; }
 .ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -144,6 +151,8 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .resume { font-size: 11px; color: var(--faint); }
 .resume:hover { color: var(--ink); }
 .openin { display: inline-flex; align-items: center; gap: 5px; }
+.morechips { font-size: 11px; color: var(--faint); align-self: center; }
+.morechips:hover { color: var(--ink); }
 .applogo { display: inline-flex; width: 12px; height: 12px; }
 .applogo svg { width: 12px; height: 12px; }
 
@@ -435,6 +444,7 @@ const GLYPHS = {
 };
 const fmtSize = (b) => b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB";
 const rel = (t) => {
+  if (!t) return "";
   const d = (Date.now()/1000 - t);
   if (d < 3600) return Math.max(1, Math.round(d/60)) + "m";
   if (d < 86400) return Math.round(d/3600) + "h";
@@ -654,6 +664,7 @@ $("#list").addEventListener("click", (ev) => {
     s._sel.has(art.dataset.art) ? s._sel.delete(art.dataset.art) : s._sel.add(art.dataset.art);
     return render();
   }
+  if (t.closest("#chips-more")) { s._chipsOpen = !s._chipsOpen; render(); return; }
   if (t.closest("#art-all")) {
     const p = peekCache[s.path];
     const all = [...(p?.artifacts || []), ...(p?.reads || [])].map((a) => a.path);
@@ -741,10 +752,15 @@ function cardHtml(s) {
       h = h.replace(new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"), "<b>$1</b>");
     return h;
   };
-  const peek = !p ? '<div class="peek"><div><span class="share-meta">Loading preview…</span></div></div>'
-    : `<div class="peek">${p.messages.slice(0, 4).map((m) =>
-        `<div><i>${m.role === "user" ? "you" : "ai"}</i><span>${hi(m.text)}</span></div>`).join("")
-      || '<div><span class="share-meta">no readable messages</span></div>'}</div>`;
+  const who = (m) => m.role === "user" ? "you" : appShort(s);
+  const bubble = (m) => `<div class="msg ${m.role === "user" ? "u" : "a"}"><i>${who(m)}</i><span>${hi(m.text)}</span></div>`;
+  const head = p ? p.messages.slice(0, 3).map(bubble).join("") : "";
+  const lastTxt = p && p.last && !(p.messages.slice(0, 3).some((m) => m.text === p.last)) ? p.last : "";
+  const lastBlock = lastTxt ? `<div class="gap" title="conversation continues">⋯</div>
+    <div class="msg a last"><i>${appShort(s)}</i><span title="this is what ⧉ copy last answer copies">${hi(lastTxt)}</span></div>` : "";
+  const peek = !p ? '<div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div>'
+    : `<div class="peek">${head + lastBlock
+      || '<div class="msg"><span class="share-meta">no readable messages</span></div>'}</div>`;
   s._sel = s._sel || new Set();
   const chip = (a, cls) => {
     const st = (s._art || {})[a.path];
@@ -757,11 +773,23 @@ function cardHtml(s) {
     return `<span class="art ${cls}${on ? " picked" : ""}" data-art="${esc(a.path)}" title="${esc(tip)}">
       <span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
   };
-  const groups = p ? [
-    ...(p.artifacts || []).filter((a) => a.kind === "created").map((a) => chip(a, "a-new")),
-    ...(p.artifacts || []).filter((a) => a.kind === "modified").map((a) => chip(a, "a-mod")),
-    ...(p.reads || []).map((a) => chip(a, "a-ref")),
+  const allChips = p ? [
+    ...(p.artifacts || []).filter((a) => a.kind === "created").map((a) => [a, "a-new"]),
+    ...(p.artifacts || []).filter((a) => a.kind === "modified").map((a) => [a, "a-mod"]),
+    ...(p.reads || []).map((a) => [a, "a-ref"]),
   ] : [];
+  const CHIP_CAP = 8;
+  const capped = !s._chipsOpen && allChips.length > CHIP_CAP;
+  // never hide a selected file behind the fold
+  const visChips = capped
+    ? allChips.filter(([a]) => s._sel.has(a.path))
+        .concat(allChips.filter(([a]) => !s._sel.has(a.path))).slice(0, CHIP_CAP)
+    : allChips;
+  const groups = visChips.map(([a, cls]) => chip(a, cls));
+  if (capped) groups.push(`<span role="button" tabindex="0" class="tog morechips" id="chips-more"
+    title="show every file">+${allChips.length - visChips.length} more</span>`);
+  else if (s._chipsOpen && allChips.length > CHIP_CAP)
+    groups.push('<span role="button" tabindex="0" class="tog morechips" id="chips-more" title="collapse the list">less</span>');
   const catNote = p?.pending && s.arts
     ? '<div class="ctl"><span class="share-meta">cataloguing files… (a moment, then reopen)</span></div>' : "";
   const nSel = s._sel.size;
@@ -809,6 +837,10 @@ async function copyLastAnswer(s) {
   } catch (e) { toast(e.message); }
 }
 
+function appShort(s) {
+  return {"claude-code": "claude", "cowork": "claude", "codex": "codex",
+          "cursor": "cursor"}[s.app] || "ai";
+}
 function openTargetFor(s) {
   if (s.app === "cursor") return null;             // no resume route yet
   if (s.app === "cowork") return "Claude";
@@ -1096,7 +1128,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Enter" && mode === "list") {
     e.preventDefault();  // otherwise the search input beeps
     const s = vis[sel];
-    if (e.altKey) { if (s) doResume(s); }
+    if (e.altKey) { if (s && openTargetFor(s)) doResume(s); }
     else if (s && expanded === s.path && s._sel?.size) shareSelectedArtifacts(s);
     else doShare(s);
   }

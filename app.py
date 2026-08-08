@@ -27,6 +27,7 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 _lock = threading.Lock()
 _cache = {}
 _annot = {}           # path → {mtime, v, arts, art_list, read_list}
+_peekmem = {}         # path → (mtime, messages, last_answer) — in-memory, cheap to rebuild
 _annot_priority = []  # paths the UI is waiting on — worker serves these first
 
 
@@ -425,7 +426,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "invalid path"}, 400)
             try:
                 session = _session_entry(path)
-                messages = parsers.peek_session(path)
+                messages, last_answer = _peek_texts(path, session["mtime"])
                 # cached lists (background-annotated) keep peek instant on huge sessions
                 pending = False
                 if "art_list" in session:
@@ -451,8 +452,8 @@ class Handler(BaseHTTPRequestHandler):
                     a["head"] = _text_head(a["path"])
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
-            self._json({"messages": messages, "artifacts": artifacts, "reads": reads,
-                        "pending": pending})
+            self._json({"messages": messages, "last": last_answer,
+                        "artifacts": artifacts, "reads": reads, "pending": pending})
         elif route == "/api/search":
             q = parse_qs(parsed.query).get("q", [""])[0]
             hits = search.search(q) if len(q.strip()) >= 2 else []
@@ -645,6 +646,35 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": "not found"}, 404)
 
 
+def _peek_texts(path, mtime):
+    """Memoized head-messages + last answer for a session (invalidated on write)."""
+    with _lock:
+        hit = _peekmem.get(path)
+    if hit and hit[0] == mtime:
+        return hit[1], hit[2]
+    msgs = parsers.peek_session(path)
+    last = parsers.peek_last_answer(path)
+    with _lock:
+        _peekmem[path] = (mtime, msgs, last)
+        if len(_peekmem) > 400:          # bound memory; oldest-inserted first
+            for k in list(_peekmem)[:100]:
+                del _peekmem[k]
+    return msgs, last
+
+
+def _peek_prewarm(n=40):
+    """Warm the peek cache for the sessions the user will actually click."""
+    with _lock:
+        recent = sorted(_cache.values(),
+                        key=lambda e: -e.get("last_used", e.get("mtime", 0)))[:n]
+        recent = [(e["path"], e["mtime"]) for e in recent]
+    for path, mtime in recent:
+        try:
+            _peek_texts(path, mtime)
+        except Exception:
+            continue
+
+
 def _artifact_counter():
     """Background: annotate cached sessions with their artifact count (cheap UI hint)."""
     while True:
@@ -656,6 +686,7 @@ def _artifact_counter():
             prio = list(_annot_priority)
             _annot_priority.clear()
         if not todo and not prio:
+            _peek_prewarm()
             return
         todo.sort(key=lambda e: (e["path"] not in prio, -e["mtime"]))
         for i, ent in enumerate(todo):

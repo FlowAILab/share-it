@@ -138,7 +138,8 @@ class CursorAdapter(Adapter):
         out = []
         for s in _cursor.discover():
             title, cwd = _cursor.meta_for(s["id"])
-            out.append({"id": s["id"], "title": title, "cwd": cwd})
+            out.append({"id": s["id"], "title": title, "cwd": cwd,
+                        "ts": s.get("ts") or 0})
         return out
 
     def parse(self, path):

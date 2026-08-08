@@ -497,6 +497,56 @@ def peek_session(path, max_texts=6, clip=280, max_bytes=6_000_000):
     return out[:max_texts]
 
 
+def peek_last_answer(path, clip=480, tail_bytes=4_000_000):
+    """The final assistant message, cheaply: scan the file TAIL only — never a
+    full parse (transcripts reach tens of MB)."""
+    real = os.path.realpath(path)
+    is_claude = (real.startswith(os.path.realpath(CLAUDE_ROOT) + os.sep)
+                 or real.startswith(os.path.realpath(RESCUE_ROOT) + os.sep))
+    try:
+        size = os.path.getsize(real)
+        with open(real, "rb") as fh:
+            fh.seek(max(0, size - tail_bytes))
+            raw = fh.read()
+    except OSError:
+        return ""
+    lines = raw.decode(errors="ignore").splitlines()
+    if size > tail_bytes and lines:
+        lines = lines[1:]  # first line is almost certainly cut mid-record
+    last = ""
+    for line in lines:
+        line = line.strip()
+        if not line or len(line) > 2_000_000:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if is_claude:
+            if obj.get("type") != "assistant" or obj.get("isSidechain"):
+                continue
+            c = (obj.get("message") or {}).get("content")
+            if isinstance(c, list):
+                for b in c:
+                    if isinstance(b, dict) and b.get("type") == "text" and (b.get("text") or "").strip():
+                        last = b["text"]
+        else:
+            payload = obj.get("payload") or {}
+            if obj.get("type") != "response_item":
+                continue
+            pt = payload.get("type")
+            if pt == "message" and payload.get("role") == "assistant":
+                t = _content_text(payload.get("content"))
+                if t.strip():
+                    last = t
+            elif pt == "agent_message":
+                t = _content_text(payload.get("content")) or payload.get("message", "")
+                if t.strip():
+                    last = t
+    last = " ".join(_ANSI.sub("", last).split())
+    return last[:clip] + ("…" if len(last) > clip else "")
+
+
 # ---------------- index (session list) ----------------
 
 def _slug_to_cwd(path):
@@ -634,29 +684,58 @@ def _codex_sqlite_index():
 SCHEMA_VERSION = 4  # bump when entry shape or title/meta extraction changes
 
 
-_TS_RE = re.compile(rb'"timestamp"\s*:\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)(?:Z|[+-]\d{2}:?\d{2})?"')
+def _parse_iso_ts(iso):
+    """ISO-8601 → epoch. Timestamps without an offset are treated as UTC (both
+    Claude Code and Codex write trailing-Z UTC stamps)."""
+    try:
+        dt = _dt.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    return dt.timestamp()
 
 
-def last_event_ts(path, mtime):
-    """Canonical last-used time: the newest `timestamp` the harness itself wrote
-    into the transcript. Filesystem mtime lies — rewrites, copies and backup
-    tools bump it in batches — so it is only the fallback."""
+def last_event_ts(path, mtime, _windows=(65536, 1_048_576)):
+    """Canonical last-used time: the newest top-level `timestamp` the harness
+    itself wrote into the transcript. Filesystem mtime lies — rewrites, copies
+    and backup tools bump it in batches — so it is only the fallback.
+
+    Walks complete JSONL records from the tail (a small window first, a bigger
+    one if the final records are huge), so nested `timestamp` fields inside tool
+    payloads can't win and partial first lines are skipped."""
     try:
         size = os.path.getsize(path)
-        with open(path, "rb") as fh:
-            fh.seek(max(0, size - 65536))
-            tail = fh.read()
     except OSError:
         return mtime
-    stamps = _TS_RE.findall(tail)
-    if not stamps:
-        return mtime
-    try:
-        iso = stamps[-1].decode()
-        dt = _dt.datetime.fromisoformat(iso).replace(tzinfo=_dt.timezone.utc)
-        return dt.timestamp()
-    except ValueError:
-        return mtime
+    for window in _windows:
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(max(0, size - window))
+                raw = fh.read()
+        except OSError:
+            return mtime
+        lines = raw.decode(errors="ignore").splitlines()
+        if size > window and lines:
+            lines = lines[1:]  # first line is cut mid-record
+        best = None
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                ts = _parse_iso_ts(obj.get("timestamp") or obj.get("ts") or "")
+                if ts is not None:
+                    best = ts if best is None else max(best, ts)
+        if best is not None:
+            return best
+        if window >= size:
+            break  # already read the whole file — nothing more to find
+    return mtime
 
 
 def scan_sessions(cache):
@@ -721,6 +800,8 @@ def scan_sessions(cache):
         for ad in _ad.ADAPTERS:
             for d in ad.discover():
                 ent = cache.get(d["id"])
+                if ent is not None and ent.get("v") != SCHEMA_VERSION:
+                    ent = None  # old-schema entry (e.g. fake time.time() stamp) — rebuild
                 if ent is None:
                     # the harness's own timestamp, or 0 — never time.time(), which
                     # would fake-freshen every undated session on every scan

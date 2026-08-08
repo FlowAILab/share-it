@@ -22,7 +22,7 @@ for f in $(git -C .. ls-files '*.py' 2>/dev/null | grep -v '^tests/' || echo ../
   cp "../$f" "$DEST/Contents/Resources/backend/$(basename "$f")" 2>/dev/null || cp "$f" "$DEST/Contents/Resources/backend/"
 done
 cp ../static/index.html "$DEST/Contents/Resources/backend/static/"
-[ -f AppIcon.icns ] || python3 make-icon.py
+python3 make-icon.py   # always regenerate — a stale committed icns must never ship
 cp AppIcon.icns "$DEST/Contents/Resources/AppIcon.icns"
 
 if [ -n "$BUNDLE_PY" ]; then

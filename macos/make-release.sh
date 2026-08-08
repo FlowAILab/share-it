@@ -27,8 +27,14 @@ mkdir -p "$STAGE/.background"
 cp "$WORK/dmg-bg.png" "$STAGE/.background/bg.png"
 
 rm -f "$WORK/rw.dmg"
+# a stale "Share-It" volume would make Finder style the wrong disk — clear it
+while [ -d "/Volumes/Share-It" ]; do
+  hdiutil detach "/Volumes/Share-It" -force || break
+done
 hdiutil create -volname "Share-It" -srcfolder "$STAGE" -ov -format UDRW "$WORK/rw.dmg"
 MNT="$(hdiutil attach -readwrite -noverify -noautoopen "$WORK/rw.dmg" | awk -F'\t' '/\/Volumes\//{print $NF}')"
+[ -d "$MNT" ] || { echo "mount failed"; exit 1; }
+trap 'hdiutil detach "$MNT" -force >/dev/null 2>&1 || true' EXIT
 osascript <<OSA
 tell application "Finder"
   tell disk "Share-It"
