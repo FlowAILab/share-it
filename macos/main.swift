@@ -138,6 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         panel.delegate = self
 
         let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        // the UI is dark-designed: pin dark vibrancy so a light wallpaper or
+        // light system theme can't wash the panel out (Raycast does the same)
+        effect.appearance = NSAppearance(named: .darkAqua)
         effect.material = .hudWindow
         effect.blendingMode = .behindWindow
         effect.state = .active
