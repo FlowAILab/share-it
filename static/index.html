@@ -471,6 +471,7 @@ document.addEventListener("click", (ev) => {
 
 
 async function copyText(text) {
+  if (nativeCmd("copyText", [], {text})) return true;   // native never loses focus
   try { await navigator.clipboard.writeText(text); return true; }
   catch { toast("couldn't reach the clipboard — link is shown below"); return false; }
 }

@@ -186,6 +186,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
               let cmd = dict["cmd"] as? String else { return }
         let files = (dict["files"] as? [String] ?? []).map { URL(fileURLWithPath: $0) }
         switch cmd {
+        case "copyText":  // plain text via native pasteboard — WKWebView's
+            // navigator.clipboard fails without focus, this never does
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(dict["text"] as? String ?? "", forType: .string)
         case "copyFiles":  // real file objects on the pasteboard — Finder-grade paste
             let pb = NSPasteboard.general
             pb.clearContents()
