@@ -158,7 +158,6 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .morechips { font-size: 11px; color: var(--faint); align-self: center; }
 .mhdr { font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
   color: var(--faint); padding: 7px 12px 3px; }
-.paysum { font-size: 11px; color: var(--faint); padding: 2px 0 0; }
 .peekbox { border: 1px solid var(--hair); background: rgba(255,255,255,0.025);
   border-radius: 10px; padding: 8px 10px 9px; }
 .chathdr { display: flex; align-items: center; justify-content: space-between;
@@ -887,9 +886,6 @@ function cardHtml(s) {
     ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⇧⌘C</kbd></button>
       <button class="share small" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"}</button>` : ""}
   </div>` : "";
-  const expLbl = {0: "no expiry", 24: "1d", 72: "3d", 168: "7d"}[opts.expiry] || "no expiry";
-  const paySum = p ? `<div class="paysum">${opts.mode} · ${
-    nSel ? `${nSel} file${nSel > 1 ? "s" : ""} ✓` : "chat only"} · ${expLbl}</div>` : "";
   const openTarget = openTargetFor(s);
   const resume = `<div class="ctl">${openTarget ? `<button class="actbtn" id="resume"
     title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</button>` : ""}
@@ -903,7 +899,7 @@ function cardHtml(s) {
       ${expiryLabel(st)}<button class="iconbtn" data-copy="${esc(opts.card && st.card ? st.card + "\n" + st.url : st.url)}">copy</button>
       ${opts.mode !== "human" ? `<button class="iconbtn" data-agentcopy="${esc(st.url)}" title="copy an instruction + link for another agent">for agent</button>` : ""}
       <button class="iconbtn" data-open="${esc(st.url)}">open</button></div>` : "";
-  return `<div class="card">${peek}${arts || catNote}${paySum}${link}${resume}</div>`;
+  return `<div class="card">${peek}${arts || catNote}${link}${resume}</div>`;
 }
 
 async function fetchPeek(s) {
