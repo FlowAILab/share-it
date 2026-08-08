@@ -86,7 +86,10 @@ body.browser #panel {
 .peek { display: flex; flex-direction: column; gap: 5px; font-size: 13px; line-height: 1.5; }
 .peek .msg { display: flex; gap: 8px; align-items: baseline; }
 .peek .msg.u i { color: var(--faint); }
-.peek .msg.a i { color: #d9825f; opacity: 0.85; }
+.peek .msg.a i { opacity: 0.9; }
+.peek .msg.a i.p-claude { color: #d9825f; }
+.peek .msg.a i.p-codex { color: #8fb8e8; }
+.peek .msg.a i.p-cursor { color: var(--dim); }
 .peek .msg.a span { color: var(--dim); }
 .peek .msg.u span { color: var(--ink); }
 .peek .msg.last span { color: var(--ink); }
@@ -753,11 +756,12 @@ function cardHtml(s) {
     return h;
   };
   const who = (m) => m.role === "user" ? "you" : appShort(s);
-  const bubble = (m) => `<div class="msg ${m.role === "user" ? "u" : "a"}"><i>${who(m)}</i><span>${hi(m.text)}</span></div>`;
+  const roleCls = `p-${appShort(s)}`;
+  const bubble = (m) => `<div class="msg ${m.role === "user" ? "u" : "a"}"><i class="${m.role === "user" ? "" : roleCls}">${who(m)}</i><span>${hi(m.text)}</span></div>`;
   const head = p ? p.messages.slice(0, 3).map(bubble).join("") : "";
   const lastTxt = p && p.last && !(p.messages.slice(0, 3).some((m) => m.text === p.last)) ? p.last : "";
   const lastBlock = lastTxt ? `<div class="gap" title="conversation continues">⋯</div>
-    <div class="msg a last"><i>${appShort(s)}</i><span title="this is what ⧉ copy last answer copies">${hi(lastTxt)}</span></div>` : "";
+    <div class="msg a last"><i class="${roleCls}">${appShort(s)}</i><span title="this is what ⧉ copy last answer copies">${hi(lastTxt)}</span></div>` : "";
   const peek = !p ? '<div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div>'
     : `<div class="peek">${head + lastBlock
       || '<div class="msg"><span class="share-meta">no readable messages</span></div>'}</div>`;
