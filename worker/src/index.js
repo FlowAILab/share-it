@@ -89,12 +89,18 @@ export default {
         return new Response("bad manifest", { status: 400 });
       let hours = Number(manifest.hours ?? 0);
       if (!ALLOWED_HOURS.has(hours)) hours = 168;
-      // verify every referenced object landed with the promised size
-      for (const o of manifest.objects.slice(0, MAX_BUNDLE_OBJECTS)) {
+      if (manifest.objects.length > MAX_BUNDLE_OBJECTS)
+        return Response.json({ error: `too many objects (max ${MAX_BUNDLE_OBJECTS})` }, { status: 413 });
+      // verify EVERY referenced object landed with the promised size + total cap
+      let total = 0;
+      for (const o of manifest.objects) {
         const headObj = await env.LINKS.head(`b/${id}/${sanitize(o.name)}`);
         if (!headObj || (o.size != null && headObj.size !== o.size))
           return Response.json({ error: `missing or size-mismatched: ${o.name}` }, { status: 409 });
+        total += headObj.size;
       }
+      if (total > MAX_BUNDLE_BYTES)
+        return Response.json({ error: `bundle exceeds ${MAX_BUNDLE_BYTES} bytes` }, { status: 413 });
       manifest.hours = hours;
       manifest.committedAt = Date.now();
       const meta = {};
@@ -145,6 +151,10 @@ export default {
           return new Response("expired", { status: 404 });
         }
         const want = sanitize(name || manifest.index);
+        // the manifest is the allowlist — uncommitted strays never serve
+        const listed = want === manifest.index
+          || (manifest.objects || []).some((o) => sanitize(o.name) === want);
+        if (!listed) return new Response("not found", { status: 404 });
         const obj = await env.LINKS.get(`b/${id}/${want}`);
         if (!obj) return new Response("not found", { status: 404 });
         return serveObject(obj, want, manifest, req.method === "HEAD");

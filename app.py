@@ -375,11 +375,14 @@ def _assemble_bundle(path, opts):
     taken.add(index_name)
 
     fobjs, artifact_links, shared_paths = [], [], []
+    explicit = opts.get("files") is not None
     for a in files:
         try:
             with open(a["path"], "rb") as fh:
                 data = fh.read()
         except OSError:
+            if explicit:  # you picked it — a share without it would be a lie
+                raise ValueError(f"can't read {a['name']} — nothing was shared")
             artifact_links.append({**a, "url": None})
             continue
         obj = _safe_obj_name(a["name"], taken)
@@ -405,7 +408,7 @@ def _render_index(session, messages, opts, artifact_links, stats, reads, media_b
     expiry_label = ("no expiry" if opts["expires_hours"] == 0
                     else "expires tomorrow" if opts["expires_hours"] == 24
                     else f"expires in {opts['expires_hours'] // 24}d")
-    links = [{**a, "url": (f"{media_base}/{a['url']}" if a.get("url") else None)}
+    links = [{**a, "url": (f"{media_base}/{a['url']}" if media_base and a.get("url") else None)}
              for a in artifact_links]
     card = render.share_card(session, stats, sum(1 for a in links if a["url"]))
     if opts["redact"]:

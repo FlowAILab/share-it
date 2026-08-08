@@ -10,6 +10,7 @@ import re
 import secrets
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -117,8 +118,11 @@ def _bundle_call(path_part, data=None, headers=None, method="POST"):
         raise OSError("hosted uploader not configured")
     h = {"X-Share-Token": hosted["token"]}
     h.update(headers or {})
-    status, body = _http(hosted["url"].rstrip("/") + path_part, data=data,
-                         method=method, headers=h)
+    try:
+        status, body = _http(hosted["url"].rstrip("/") + path_part, data=data,
+                             method=method, headers=h)
+    except urllib.error.HTTPError as e:  # non-2xx must not escape rollback
+        return e.code, e.read()
     return status, body
 
 

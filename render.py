@@ -167,7 +167,8 @@ def clipboard_html(session, messages, include_tools=False, include_thinking=Fals
     LBL_U = 'font-weight:600;color:#555'
     TOOL = ('margin:0 0 8px;padding:6px 10px;background:#f5f5f4;border-radius:6px;'
             'font:12px/1.4 ui-monospace,monospace;color:#555')
-    out = [f'<div style="{P}"><b>{_esc(session.get("title", ""))}</b></div>']
+    title = clean(session.get("title", ""))  # titles can carry pasted secrets too
+    out = [f'<div style="{P}"><b>{_esc(title)}</b></div>']
     for m in messages:
         r = m["role"]
         if r == "thinking" and not include_thinking:
@@ -175,8 +176,12 @@ def clipboard_html(session, messages, include_tools=False, include_thinking=Fals
         if r == "tool":
             if not include_tools:
                 continue
-            head = _esc(truncate_middle(clean(m.get("input") or ""), 300))
-            out.append(f'<div style="{TOOL}">⚙ {_esc(m.get("name", "?"))} {head}</div>')
+            tin = _esc(truncate_middle(clean(m.get("input") or ""), 500))
+            tout = _esc(truncate_middle(clean(m.get("output") or ""), 1200))
+            body = f'⚙ <b>{_esc(m.get("name", "?"))}</b> {tin}'
+            if tout.strip():
+                body += f'<br>→ {tout}'
+            out.append(f'<div style="{TOOL}">{body}</div>')
             continue
         text = clean(m.get("text") or "")
         if not text.strip():
@@ -418,7 +423,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
             f'<meta name="referrer" content="no-referrer">'
             "<meta http-equiv=\"Content-Security-Policy\" "
             "content=\"default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; "
-            "img-src data:\">"
+            "img-src 'self' data:\">"
             f'<title>{_esc(title)}</title><style>{_HTML_CSS}</style></head><body>'
             f'<header><div class="logo">{logo}</div><div><h1>{_esc(title)}</h1>'
             f'<div class="meta">{src_label} · {date} · {mode_label}{" · " + _esc(expiry_label) if expiry_label else ""}'

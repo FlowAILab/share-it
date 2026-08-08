@@ -211,9 +211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             for img in images {   // separate items: apps inline or attach natively
                 if let data = try? Data(contentsOf: img) {
                     let it = NSPasteboardItem()
-                    let type: NSPasteboard.PasteboardType =
-                        img.pathExtension.lowercased() == "png" ? .png
-                        : NSPasteboard.PasteboardType("public.jpeg")
+                    let uti: String = [
+                        "png": "public.png", "jpg": "public.jpeg", "jpeg": "public.jpeg",
+                        "gif": "com.compuserve.gif", "webp": "org.webmproject.webp",
+                    ][img.pathExtension.lowercased()] ?? "public.png"
+                    let type = NSPasteboard.PasteboardType(uti)
                     it.setData(data, forType: type)
                     items.append(it)
                 }

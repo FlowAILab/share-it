@@ -274,16 +274,7 @@ function smartCopy() {
   const vis = visible();
   const s = vis.find((x) => x.path === expanded) || vis[sel];
   if (!s) return false;
-  if (expanded === s.path && s._selTouched && s._sel?.size) {  // user picked files → copy those
-    const files = [...s._sel];
-    if (nativeCmd("copyFiles", files))
-      toast(`Copied ${files.length} file${files.length > 1 ? "s" : ""} — paste in Finder or any app`);
-    else api("/api/file/copy", {path: s.path, files})
-      .then((d) => toast(`Copied ${d.count} file${d.count > 1 ? "s" : ""} — paste in Finder or any app`))
-      .catch((err) => toast(err.message));
-    return true;
-  }
-  copyChat(s);   // session selected → rich clipboard: chat + images + files
+  copyChat(s);   // ⌘C is always the chat; files have ⇧⌘C and their own button
   return true;
 }
 
@@ -424,7 +415,7 @@ function openMenu(s, x, y, anchorRight) {
   closeMenu();
   const items = menuItemsFor(s);
   if (!items.length) return;
-  menu = {items, sel: items.findIndex((i) => !i.sep && !i.h), s, sub: null};
+  menu = {items, sel: items.findIndex((i) => !i.sep && !i.hdr), s, sub: null};
   const el = document.createElement("div");
   el.id = "menu"; el.setAttribute("role", "menu");
   el.innerHTML = menuHTML(items, menu.sel);
@@ -662,8 +653,7 @@ function renderList() {
     : `<span class="brand">Share-It</span><span class="fdiv">${tally}</span>
      <span class="grow"></span><span>${(() => {
        const ex = vis.find((x) => x.path === expanded);
-       if (ex?._selTouched && ex?._sel?.size) return `<kbd>⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌥click</kbd> reveal in Finder`;
-       if (ex?._sel?.size) return `<kbd>⌘C</kbd> copy chat · <kbd>⇧⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""}`;
+       if (ex?._sel?.size) return `<kbd>⌘C</kbd> copy chat · <kbd>⇧⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌥click</kbd> reveal`;
        {
          const cur = vis[sel];
          const openHint = cur && openTargetFor(cur) ? ` · <kbd>⌥⏎</kbd> open in ${openTargetFor(cur)}` : "";
@@ -990,7 +980,7 @@ async function doShare(s, modeOverride) {
   s._share = "busy"; render();
   const gen = optsGen;
   try {
-    const selFiles = (peekCache[s.path] && (s._selTouched || s._sel?.size)) ? [...(s._sel || [])] : undefined;
+    const selFiles = peekCache[s.path] ? [...(s._sel || [])] : undefined;
     const d = await api("/api/share", {path: s.path, redact: opts.redact,
       mode: modeOverride || opts.mode, expires_hours: opts.expiry,
       ...(selFiles ? {files: selFiles} : {})});
@@ -1152,7 +1142,7 @@ document.addEventListener("keydown", (e) => {
       sub.querySelectorAll(".mi").forEach((el) => el.classList.toggle("sel", +el.dataset.mi === menu.sub.sel));
       return;
     }
-    const sels = menu.items.map((it, i) => (it.h || it.sep) ? null : i).filter((i) => i !== null);
+    const sels = menu.items.map((it, i) => (it.hdr || it.sep) ? null : i).filter((i) => i !== null);
     if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
