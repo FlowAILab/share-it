@@ -40,9 +40,10 @@ def discover():
             ts = float(e.get("dateCreated") or 0) / 1000.0
         except (TypeError, ValueError):
             ts = 0
-        out.append({"id": os.path.join(_SESS, f"{e['sessionId']}.json"),
-                    "title": " ".join((e.get("title") or "").split()),
-                    "cwd": _clean_cwd(e.get("workspaceDirectory")), "ts": ts})
+        p = os.path.join(_SESS, f"{e['sessionId']}.json")
+        mt = os.path.getmtime(p) if os.path.isfile(p) else ts   # updates → freshness
+        out.append({"id": p, "title": " ".join((e.get("title") or "").split()),
+                    "cwd": _clean_cwd(e.get("workspaceDirectory")), "ts": mt})
     return out
 
 

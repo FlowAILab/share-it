@@ -62,7 +62,7 @@ def discover(extid):
     out = []
     for d in _task_dirs(extid):
         tid = os.path.basename(d)
-        ts = int(tid) / 1000.0 if tid.isdigit() else os.path.getmtime(d)
+        ts = os.path.getmtime(d)   # dir mtime reflects the latest write
         out.append({"id": d, "title": _title(d), "cwd": "", "ts": ts})
     return out
 

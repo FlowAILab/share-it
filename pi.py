@@ -24,19 +24,25 @@ def _files():
     return glob.glob(os.path.join(ROOT, "*", "*.jsonl"))
 
 
-def _block_text(content):
+def _split_blocks(content):
+    """(visible_text, thinking_text) — thinking is a distinct block, kept apart
+    so default (non-deep) exports can hide reasoning."""
     if isinstance(content, str):
-        return content
-    parts = []
+        return content, ""
+    text, think = [], []
     for b in content if isinstance(content, list) else []:
         if not isinstance(b, dict):
             continue
         t = b.get("type")
         if t in ("text", "output_text", "input_text") and b.get("text"):
-            parts.append(b["text"])
-        elif t == "thinking" and isinstance(b.get("thinking"), str):
-            parts.append(b["thinking"])
-    return "\n".join(p for p in parts if p)
+            text.append(b["text"])
+        elif t == "thinking":
+            v = b.get("thinking")
+            if isinstance(v, dict):
+                v = v.get("text", "")
+            if isinstance(v, str) and v:
+                think.append(v)
+    return "\n".join(text), "\n".join(think)
 
 
 def _header(path):
@@ -72,8 +78,9 @@ def discover():
         cwd, title, ts = _header(path)
         if not title:  # fall back to the first user line
             title = _first_user(path)
+        mt = os.path.getmtime(path) if os.path.isfile(path) else ts
         out.append({"id": path, "title": title or "(untitled)",
-                    "cwd": cwd, "ts": ts})
+                    "cwd": cwd, "ts": mt})
     return out
 
 
@@ -85,7 +92,10 @@ def _first_user(path):
 
 
 def parse(path):
-    msgs = []
+    # Pi files are branching trees (id/parentId). Walk the newest leaf's ancestry
+    # so we render one coherent conversation, not merged sibling branches.
+    entries = {}
+    order = []
     try:
         with open(path, errors="ignore") as fh:
             for line in fh:
@@ -96,20 +106,39 @@ def parse(path):
                     o = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if o.get("type") != "message":
-                    continue
-                m = o.get("message") or {}
-                role = m.get("role")
-                text = _block_text(m.get("content"))
-                if not text.strip():
-                    continue
-                if role == "user":
-                    msgs.append({"role": "user", "text": text})
-                elif role == "assistant":
-                    msgs.append({"role": "assistant", "text": text})
-                elif role == "toolResult":
-                    msgs.append({"role": "tool", "name": "tool",
-                                 "input": "", "output": text[:4000], "ok": True})
+                eid = o.get("id")
+                if eid is not None:
+                    entries[eid] = o
+                    order.append(eid)
     except OSError:
-        pass
+        return []
+    if not entries:
+        return []
+    parents = {e.get("id"): e.get("parentId") for e in entries.values()}
+    referenced = {p for p in parents.values() if p is not None}
+    leaves = [eid for eid in order if eid not in referenced]
+    leaf = leaves[-1] if leaves else order[-1]
+    chain, seen, cur = [], set(), leaf   # walk to root, then reverse
+    while cur is not None and cur in entries and cur not in seen:
+        seen.add(cur)
+        chain.append(entries[cur])
+        cur = parents.get(cur)
+    chain.reverse()
+    msgs = []
+    for o in chain:
+        if o.get("type") != "message":
+            continue
+        m = o.get("message") or {}
+        role = m.get("role")
+        text, think = _split_blocks(m.get("content"))
+        if role == "user" and text.strip():
+            msgs.append({"role": "user", "text": text})
+        elif role == "assistant":
+            if think.strip():
+                msgs.append({"role": "thinking", "text": think})
+            if text.strip():
+                msgs.append({"role": "assistant", "text": text})
+        elif role == "toolResult" and text.strip():
+            msgs.append({"role": "tool", "name": "tool", "input": "",
+                         "output": text[:4000], "ok": True})
     return msgs

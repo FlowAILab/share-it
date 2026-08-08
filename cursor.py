@@ -24,7 +24,7 @@ def _rows(path, table):
     if not os.path.isfile(path):
         return
     try:
-        con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     except sqlite3.Error:
         return
     try:

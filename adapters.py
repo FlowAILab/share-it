@@ -176,7 +176,7 @@ class OpenCodeAdapter(Adapter):
     id = "opencode"; label = "OpenCode"; note = "coding agent (SQLite)"
 
     def roots(self):
-        return [_opencode._DATA]
+        return _opencode.data_dirs()
 
     def parse(self, path):
         return _opencode.parse(path)
@@ -217,7 +217,8 @@ class _ClineFamily(Adapter):
     def roots(self):
         rs = [os.path.join(b, self.ext, "tasks") for b in _cline._BASES]
         if self.ext == "saoudrizwan.claude-dev":
-            rs.append(os.path.expanduser("~/.cline/data/tasks"))
+            rs.append(os.path.join(os.environ.get("CLINE_DATA_DIR")
+                                   or os.path.expanduser("~/.cline/data"), "tasks"))
         return rs
 
     def parse(self, path):

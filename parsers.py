@@ -289,11 +289,12 @@ def parse_session(path):
     if (real.startswith(os.path.realpath(CODEX_ROOT) + os.sep)
             or real.startswith(os.path.realpath(CODEX_ARCHIVE) + os.sep)):
         return parse_codex(real)
-    if "#" in path:
-        import adapters as _ad
-        for ad in _ad.ADAPTERS:
-            if ad.owns(path):
-                return ad.parse(path)
+    import adapters as _ad
+    for ad in _ad.ADAPTERS:
+        if ad.id in ("claude", "codex"):
+            continue
+        if ad.owns(real) or ad.owns(path):
+            return ad.parse(path)
     raise ValueError("path outside transcript roots")
 
 
@@ -957,7 +958,11 @@ def scan_sessions(cache):
     try:
         import adapters as _ad
         for ad in _ad.ADAPTERS:
-            for d in ad.discover():
+            try:
+                found = ad.discover()
+            except Exception:
+                continue  # a broken client never suppresses the others
+            for d in found:
                 ent = cache.get(d["id"])
                 if ent is not None and ent.get("v") != SCHEMA_VERSION:
                     ent = None  # old-schema entry (e.g. fake time.time() stamp) — rebuild

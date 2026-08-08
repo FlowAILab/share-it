@@ -10,8 +10,21 @@ import json
 import os
 import sqlite3
 
-_DIR = os.path.join(os.environ.get("GOOSE_PATH_ROOT")
-                    or os.path.expanduser("~/.local/share/goose"), "sessions")
+def _sessions_dir():
+    root = os.environ.get("GOOSE_PATH_ROOT")
+    cands = []
+    if root:
+        cands += [os.path.join(root, "data", "sessions"), os.path.join(root, "sessions")]
+    cands += [os.path.expanduser("~/.local/share/goose/sessions"),
+              os.path.expanduser("~/Library/Application Support/goose/sessions"),
+              os.path.expanduser("~/Library/Application Support/Block/goose/sessions")]
+    for c in cands:
+        if os.path.isdir(c):
+            return c
+    return cands[0]
+
+
+_DIR = _sessions_dir()
 _DB = os.path.join(_DIR, "sessions.db")
 
 
@@ -20,7 +33,7 @@ def available():
 
 
 def _conn():
-    return sqlite3.connect(f"file:{_DB}?mode=ro&immutable=1", uri=True)
+    return sqlite3.connect(f"file:{_DB}?mode=ro", uri=True)
 
 
 def _content_text(blocks):

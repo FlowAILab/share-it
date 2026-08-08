@@ -33,20 +33,59 @@ def _session_files():
     return out
 
 
+def _apply(base, path, value, kind, index):
+    """Apply one object-mutation-log op (Set/Push/Delete) to `base` by path."""
+    if not path:
+        return
+    node = base
+    for key in path[:-1]:
+        try:
+            node = node[key]
+        except (KeyError, IndexError, TypeError):
+            return
+    last = path[-1]
+    try:
+        if kind == 1:            # Set
+            node[last] = value
+        elif kind == 2:          # Push (append, or insert at index)
+            node.setdefault(last, []) if isinstance(node, dict) else None
+            target = node[last]
+            if index is None:
+                target.append(value)
+            else:
+                target.insert(index, value)
+        elif kind == 3:          # Delete
+            if isinstance(node, dict):
+                node.pop(last, None)
+            else:
+                del node[last]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return
+
+
 def _load(path):
-    """Full ISerializableChatData dict from a .json or .jsonl (Initial snapshot)."""
+    """Full ISerializableChatData dict from a .json (flat) or .jsonl (Initial
+    snapshot + replayed Set/Push/Delete mutations — evolving conversations)."""
     try:
         if path.endswith(".jsonl"):
+            base = None
             with open(path, errors="ignore") as fh:
                 for line in fh:
                     line = line.strip()
                     if not line:
                         continue
-                    o = json.loads(line)
-                    if o.get("kind") == 0 and isinstance(o.get("v"), dict):
-                        return o["v"]      # first Initial = full snapshot
-                    return o if "requests" in o else {}
-            return {}
+                    try:
+                        o = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    kind = o.get("kind")
+                    if kind == 0 and isinstance(o.get("v"), dict):
+                        base = o["v"]            # snapshot (a later Initial replaces)
+                    elif base is not None and kind in (1, 2, 3):
+                        _apply(base, o.get("k") or [], o.get("v"), kind, o.get("i"))
+                    elif base is None and "requests" in o:
+                        base = o                 # bare object fallback
+            return base or {}
         with open(path, errors="ignore") as fh:
             return json.load(fh)
     except (OSError, json.JSONDecodeError):
@@ -76,7 +115,7 @@ def discover():
             continue
         title = data.get("customTitle") or data.get("computedTitle") or ""
         cwd = _workspace_cwd(path) or _clean(data.get("workingDirectory"))
-        ts = (data.get("creationDate") or 0) / 1000.0
+        ts = os.path.getmtime(path) if os.path.isfile(path) else (data.get("creationDate") or 0) / 1000.0
         out.append({"id": path, "title": " ".join(str(title).split()),
                     "cwd": cwd, "ts": ts})
     return out

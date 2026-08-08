@@ -23,12 +23,20 @@ def _db_path():
     return None
 
 
+def data_dirs():
+    dirs = [_DATA]
+    p = _db_path()
+    if p:
+        dirs.append(os.path.dirname(p))
+    return dirs
+
+
 def available():
     return _db_path() is not None
 
 
 def _conn(path):
-    return sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
 
 
 def _tables(con):
@@ -95,7 +103,6 @@ def parse(session_id):
                 roles[mid] = (json.loads(data) or {}).get("role")
             except (json.JSONDecodeError, TypeError):
                 roles[mid] = None
-        cur = {}  # message_id -> accumulated text, role
         for mid, data in con.execute(
                 "SELECT message_id, data FROM part WHERE session_id = ? ORDER BY id", (sid,)):
             text, kind = _part_text(data)
@@ -107,6 +114,20 @@ def parse(session_id):
             elif role == "assistant":
                 msgs.append({"role": "assistant" if kind != "thinking" else "thinking",
                              "text": text})
+        if not msgs and "session_message" in tables:   # v2 layout (best-effort)
+            for data, in con.execute(
+                    "SELECT data FROM session_message WHERE session_id = ? ORDER BY id", (sid,)):
+                try:
+                    d = json.loads(data) if isinstance(data, (str, bytes)) else data
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                role = d.get("role")
+                text = "".join(p.get("text", "") for p in (d.get("parts") or [])
+                               if isinstance(p, dict) and p.get("type") == "text") or d.get("text", "")
+                if text.strip() and role in ("user", "assistant"):
+                    msgs.append({"role": role, "text": text})
     except sqlite3.Error:
         return msgs
     finally:
