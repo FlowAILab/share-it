@@ -1,8 +1,8 @@
 <h1 align="center">Share-It</h1>
 
 <p align="center">
-  <b>Share any AI-coding session — or the files it made — as one clean link.</b><br>
-  <sub>Claude Code · Codex · Cursor · Cowork · all your local sessions, one keystroke away.</sub>
+  <b>Hand off any AI-coding session — with its output files — to another agent in one click.</b><br>
+  <sub>Works across Claude Code · Codex · Cursor · Cowork. Your sessions, one keystroke away.</sub>
 </p>
 
 <p align="center">
@@ -16,25 +16,33 @@
 
 ---
 
-Every serious prompt, debugging session, and agent run lives trapped on your laptop.
-**Share-It** surfaces them all in a Spotlight-style palette and turns any one into a link.
+Your best prompts and agent runs are trapped on your laptop. Share-It makes them
+one keystroke away — and one click to pass on.
 
-### What you can do
+### Core
 
-- **Share with a human** — a clean, readable web page of the conversation.
-- **Hand off to an agent** — markdown with a handoff manifest another AI can pick up and continue.
-- **Send the files** — the artifacts a session produced (PDFs, images, code) ride along, or copy the real files straight to Finder / Slack / email.
-- **Search everything** — full-text across every session, even ones your tools already deleted.
-- **Pick up where you left off** — resume a session in its original app or terminal.
+- **🤝 Agent handoff** — turn any session into a clean context bundle another agent
+  can continue from: the conversation, the decisions, the last open request, **and the
+  files it produced**. Paste the link into Claude, Codex, or Cursor and it picks up
+  exactly where you left off. Works across all of them.
+- **🔗 One-click link** — press ⏎, get a short public link on your clipboard. Send it
+  to a teammate or drop it into any chat.
+- **📎 One-click files** — copy the real artifacts a session created (PDFs, images,
+  code) straight to Finder, Slack, or email — actual files, not screenshots.
 
-Copy the whole session locally, or share a link — your call.
+That's it: **⌥S → find it → share it.** No exporting, no zipping, no hunting for paths.
+
+### Also
+
+Reader-page mode for humans · resume a session in its original app · full-text search ·
+keeps sessions your tools auto-delete · configurable link expiry.
 
 ### Private by default
 
-- **Nothing leaves your machine until you press share.**
-- Shared content is **never used for training** — it's your data on your own storage.
-- Secret-scrubbing is on by default; the preview shows exactly what goes out.
-- Links are unguessable and **public to anyone who has them**, with **configurable expiry** (forever, 1 / 3 / 7 days) and one-click delete.
+Nothing leaves your machine until you press share. Your data is **never used for
+training** — it's yours, on your own storage. Secrets are scrubbed automatically and
+the preview shows exactly what goes out. Links are unguessable, expire on your terms
+(∞ / 1d / 3d / 7d), and delete in one click.
 
 ### Build from source
 
@@ -42,8 +50,7 @@ Copy the whole session locally, or share a link — your call.
 ./macos/build.sh          # → ~/Applications/share-it.app
 ```
 
-Runs a tiny local app (stdlib Python + a native panel). Shares upload to a Cloudflare
-R2 worker (`worker/`) — deploy your own or use the bundled one. Adding a new harness is
-one small class in `adapters.py`.
+Local app (stdlib Python + native panel); shares upload to a Cloudflare R2 worker
+(`worker/`). Add a new harness in one small class — see `adapters.py`.
 
 MIT licensed · built by [FlowAILab](https://github.com/FlowAILab)
