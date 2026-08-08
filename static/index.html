@@ -28,7 +28,7 @@ body.browser #panel {
   background: rgba(24,26,31,0.72);
   backdrop-filter: blur(28px) saturate(1.2); -webkit-backdrop-filter: blur(28px) saturate(1.2);
   border: 1px solid var(--hair); border-radius: 16px;
-  width: min(680px, 94vw); height: min(540px, 88vh); margin: auto;
+  width: min(600px, 94vw); height: min(440px, 86vh); margin: auto;
   box-shadow: 0 24px 80px rgba(0,0,0,0.5);
 }
 #panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
@@ -36,7 +36,7 @@ body.browser #panel {
 #top { display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; }
 #q {
   flex: 1; background: none; border: none; outline: none; color: var(--ink);
-  font: 300 19px -apple-system, system-ui, sans-serif; caret-color: var(--ink);
+  font: 300 21px -apple-system, system-ui, sans-serif; caret-color: var(--ink);
 }
 #q::placeholder { color: var(--faint); }
 #q:focus-visible { box-shadow: 0 1px 0 var(--dim); }
@@ -155,6 +155,9 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .resume:hover { color: var(--ink); }
 .openin { display: inline-flex; align-items: center; gap: 5px; }
 .morechips { font-size: 11px; color: var(--faint); align-self: center; }
+.mhdr { font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--faint); padding: 7px 12px 3px; }
+.paysum { font-size: 11px; color: var(--faint); padding: 2px 0 0; }
 .art .selmark { color: #7fc97f; font-weight: 700; margin-right: 1px; }
 .art:focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
 .morechips:hover { color: var(--ink); }
@@ -218,9 +221,9 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 if (!window.webkit?.messageHandlers?.shareit) document.body.classList.add("browser");
 const nativePost = (m) => window.webkit?.messageHandlers?.shareit?.postMessage(m);
-const nativeCmd = (cmd, files) => {
+const nativeCmd = (cmd, files, extra) => {
   if (!window.webkit?.messageHandlers?.shareit) return false;
-  nativePost({cmd, files});
+  nativePost({cmd, files, ...(extra || {})});
   return true;
 };
 // never alert(): modal dialogs freeze the panel (and automation). inline toast instead
@@ -263,11 +266,25 @@ function smartCopy() {
       .catch((err) => toast(err.message));
     return true;
   }
-  {  // session selected → copy session export (current mode) + its files
-    const fp = [...(s.art_list || []), ...(s.read_list || [])].map((f) => f.path);
-    copySession(s, null, fp);
-  }
+  copyChat(s);   // session selected → rich clipboard: chat + images + files
   return true;
+}
+
+async function copyChat(s) {
+  try {
+    const sel = (s._selTouched || s._sel?.size) ? [...(s._sel || [])] : undefined;
+    const d = await api("/api/copy_chat", {path: s.path, mode: opts.mode,
+      redact: opts.redact, ...(sel ? {files: sel} : {})});
+    const parts = [`Copied chat`];
+    if (d.images?.length) parts.push(`${d.images.length} image${d.images.length > 1 ? "s" : ""}`);
+    if (d.files?.length) parts.push(`${d.files.length} file${d.files.length > 1 ? "s" : ""}`);
+    if (nativeCmd("copyRich", d.files || [], {html: d.html, markdown: d.markdown, images: d.images || []})) {
+      toast(parts.join(" · ") + " — paste anywhere");
+    } else {
+      await copyText(d.markdown);
+      toast("Copied chat as markdown (browser mode)");
+    }
+  } catch (e) { toast(e.message); }
 }
 window.__menuCopy = smartCopy;
 
@@ -303,32 +320,34 @@ function menuItemsFor(s) {
   const base = (q) => q.split("/").pop();
   const payload = nSelM === 1 ? base(selPaths[0]) : `${nSelM} files`;
   const items = [
-    {t: "Share for Agent", k: "⏎", run: () => doShare(s, "agent")},
-    {t: "Share for Human", run: () => doShare(s, "human")},
-    {t: "Share Deep", run: () => {
+    {hdr: "Share link"},
+    {t: "For an Agent — handoff", k: "⏎", run: () => doShare(s, "agent")},
+    {t: "For a Teammate — reader page", run: () => doShare(s, "human")},
+    {t: "Deep — adds reasoning", run: () => {
       if (!localStorage.getItem("shareit-deep-warned")) {
         localStorage.setItem("shareit-deep-warned", "1");
         toast("Deep shares reasoning, detailed tool output and more files — review before sending.");
       }
       doShare(s, "deep");
     }},
-    {sep: 1},
-    {t: `Copy Session (.${opts.mode === "human" ? "html" : "md"})`, k: nf ? "" : "⌘C", run: () => copySession(s, null, [])},
+    {hdr: "Copy"},
+    {t: "Chat — pastes anywhere", k: "⌘C", run: () => copyChat(s)},
   ];
-  if (nf) {
-    items.push(
-      {t: `Copy Session + ${payload}`, k: "⌘C", run: () => copySession(s, null, selPaths)},
-      {t: `Copy ${payload}`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
-    if (nSelM < nf) items.push({t: `Choose Files… (${nf} total)`, run: () => {
-      if (expanded !== s.path) toggle(s);
-      s._chipsOpen = true; render();
-    }});
-  }
-  items.push({t: "Copy Last Output", sub: [
+  if (nf) items.push({t: `Files (${payload})`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
+  items.push({t: "Last Answer", sub: [
     {t: "Full Answer", run: () => copyLastAnswer(s)},
     {t: "Last Code Block", run: () => copyLastCode(s)},
   ]});
-  items.push({sep: 1});
+  items.push({t: "Copy as…", sub: [
+    {t: "Markdown file (.md)", run: () => copySession(s, "agent", [])},
+    {t: "Web page (.html)", run: () => copySession(s, "human", [])},
+    {t: `Bundle — chat + ${nf || "no"} file${nf === 1 ? "" : "s"}`, run: () => copySession(s, null, fp)},
+  ]});
+  if (nf && nSelM < nf) items.push({t: `Choose Files… (${nf} total)`, run: () => {
+    if (expanded !== s.path) toggle(s);
+    s._chipsOpen = true; render();
+  }});
+  items.push({hdr: "This session"});
   const ot = openTargetFor(s);
   if (ot) items.push({t: `Open in ${ot}`, k: "⌥⏎", run: () => doResume(s)});
   items.push({t: "Reveal in Finder", run: () =>
@@ -370,6 +389,7 @@ async function copySession(s, modeOverride, extraFiles) {
 
 function menuHTML(items, selIdx) {
   return items.map((i, idx) => i.sep ? '<hr role="separator">'
+    : i.hdr ? `<div class="mhdr">${esc(i.hdr)}</div>`
     : `<div class="mi${idx === selIdx ? " sel" : ""}${i.sub ? " has-sub" : ""}" role="menuitem" tabindex="-1"`
       + ` aria-haspopup="${i.sub ? "menu" : "false"}" data-mi="${idx}">`
       + `${esc(i.t)}${i.sub ? '<span class="chev">›</span>' : i.k ? `<kbd>${i.k}</kbd>` : ""}</div>`).join("");
@@ -827,6 +847,11 @@ function cardHtml(s) {
     ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⌘C</kbd></button>
       <button class="share small" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"} ⏎</button>` : ""}
   </div>` : "";
+  const expLbl = {0: "no expiry", 24: "1d", 72: "3d", 168: "7d"}[opts.expiry] || "no expiry";
+  const paySum = p ? `<div class="paysum">${opts.mode} · ${
+    nSel ? `${nSel} file${nSel > 1 ? "s" : ""} ✓` : "chat only"} · ${expLbl} · ${
+    opts.redact ? "text scrubbed" : "not scrubbed"}${
+    (p.artifacts || []).length || (p.reads || []).length ? "" : ""}</div>` : "";
   const openTarget = openTargetFor(s);
   const resume = `<div class="ctl">${openTarget ? `<span class="tog resume openin" id="resume"
     title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</span>` : ""}
@@ -840,7 +865,7 @@ function cardHtml(s) {
       ${expiryLabel(st)}<button class="iconbtn" data-copy="${esc(opts.card && st.card ? st.card + "\n" + st.url : st.url)}">copy</button>
       ${opts.mode !== "human" ? `<button class="iconbtn" data-agentcopy="${esc(st.url)}" title="copy an instruction + link for another agent">for agent</button>` : ""}
       <button class="iconbtn" data-open="${esc(st.url)}">open</button></div>` : "";
-  return `<div class="card">${peek}${arts || catNote}${link}${resume}</div>`;
+  return `<div class="card">${peek}${arts || catNote}${paySum}${link}${resume}</div>`;
 }
 
 async function fetchPeek(s) {
@@ -948,6 +973,10 @@ async function doShare(s, modeOverride) {
     if (gen !== optsGen) { s._share = null; render(); return; }  // options changed mid-flight
     s._share = {url: d.url, provider: d.provider, expires: d.expires, card: d.card, fresh: true};
     copyText(opts.card && d.card ? `${d.card}\n${d.url}` : d.url);
+    const bits = ["Link copied · chat"];
+    if (d.n_files) bits.push(`${d.n_files} file${d.n_files > 1 ? "s" : ""}`);
+    if (d.n_images) bits.push(`${d.n_images} image${d.n_images > 1 ? "s" : ""}`);
+    toast(bits.join(" · "));
     flashCopied(s.path);
     if (expanded !== s.path) toggle(s);  // reveal the link row
     return;

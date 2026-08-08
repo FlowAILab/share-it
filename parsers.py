@@ -96,9 +96,40 @@ def _is_claude_subagent_file(path):
     return base.startswith("agent-") or f"{os.sep}subagents{os.sep}" in path
 
 
+# Inline media limits: enough for screenshots/pastes, never a transcript bomb.
+MEDIA_MAX_ONE = 5_000_000       # b64 chars per image (~3.7MB decoded)
+MEDIA_MAX_PER_SESSION = 24
+
+# Codex wraps pasted images in <image src="/Users/…/x.png"> markers — local
+# paths leak usernames, so exports must never carry them.
+_IMAGE_MARKER = re.compile(r"</?image\b[^>]*>")
+
+
+def _media_entry(media_type, data_b64, counter):
+    """Validated inline-image entry, or None (over cap / empty / malformed —
+    remote-control sessions are known to persist empty base64 sources)."""
+    if not (isinstance(data_b64, str) and 0 < len(data_b64) <= MEDIA_MAX_ONE):
+        return None
+    if counter[0] >= MEDIA_MAX_PER_SESSION:
+        return None
+    counter[0] += 1
+    return {"media_type": media_type or "image/png", "data": data_b64}
+
+
+def _data_url_media(url, counter):
+    """'data:image/png;base64,....' → media entry, else None."""
+    if not (isinstance(url, str) and url.startswith("data:image/")):
+        return None
+    head, sep, b64 = url.partition(";base64,")
+    if not sep:
+        return None
+    return _media_entry(head[5:], b64, counter)
+
+
 def parse_claude(path):
     messages = []
     tools_by_id = {}
+    media_count = [0]
     keep_sidechain = _is_claude_subagent_file(path)  # subagent files are all sidechain
     for obj in _iter_jsonl(path):
         t = obj.get("type")
@@ -117,7 +148,13 @@ def parse_claude(path):
                 if bt == "text" and block.get("text", "").strip():
                     messages.append({"role": "user", "text": block["text"]})
                 elif bt == "image":
-                    messages.append({"role": "user", "text": "[image]"})
+                    src = block.get("source") or {}
+                    m = (_media_entry(src.get("media_type"), src.get("data"), media_count)
+                         if src.get("type") == "base64" else None)
+                    msg = {"role": "user", "text": "[image]"}
+                    if m:
+                        msg["media"] = [m]
+                    messages.append(msg)
                 elif bt == "tool_result":
                     tool = tools_by_id.get(block.get("tool_use_id"))
                     if tool is not None:
@@ -151,6 +188,7 @@ _CODEX_ITEM_TYPES = {"message", "agent_message", "reasoning", "function_call",
 def parse_codex(path):
     messages = []
     tools_by_call = {}
+    media_count = [0]
     fallback_users = []  # event_msg user_message, used only if response_items had none
     saw_user = False
     for obj in _iter_jsonl(path):
@@ -166,12 +204,20 @@ def parse_codex(path):
             continue
         pt = payload.get("type")
         if pt == "message":
-            text = _content_text(payload.get("content"))
+            text = _IMAGE_MARKER.sub("", _content_text(payload.get("content")))
             role = payload.get("role")
+            media = [m for m in (
+                _data_url_media(b.get("image_url"), media_count)
+                for b in (payload.get("content") or [])
+                if isinstance(b, dict) and b.get("type") == "input_image"
+            ) if m]
             if role == "user":
                 stripped = text.lstrip()
-                if stripped and not stripped.startswith(_CODEX_CONTEXT_PREFIXES):
-                    messages.append({"role": "user", "text": text})
+                if (stripped and not stripped.startswith(_CODEX_CONTEXT_PREFIXES)) or media:
+                    msg = {"role": "user", "text": text}
+                    if media:
+                        msg["media"] = media
+                    messages.append(msg)
                     saw_user = True
             elif role == "assistant" and text.strip():
                 messages.append({"role": "assistant", "text": text})

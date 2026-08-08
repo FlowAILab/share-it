@@ -61,7 +61,7 @@ def _rel(path, cwd):
 def render_markdown(session, messages, redact_secrets=True, include_thinking=False,
                     messages_only=False, tool_output_limit=2000, tool_input_limit=800,
                     artifact_links=None, read_files=None, stats=None, mode="agent",
-                    last_request="", cwd=None, expiry_label=""):
+                    last_request="", cwd=None, expiry_label="", media_base=None):
     src = "Claude Code" if session["source"] == "claude" else "Codex"
     date = time.strftime("%Y-%m-%d", time.localtime(session.get("last_used") or session.get("mtime") or time.time()))
     n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
@@ -103,8 +103,10 @@ def render_markdown(session, messages, redact_secrets=True, include_thinking=Fal
             continue  # empty blocks are noise
         if role == "user":
             lines += ["", "## User", "", _strip_base64(msg["text"])]
+            lines += _media_md(msg, media_base)
         elif role == "assistant":
             lines += ["", "## Assistant", "", _strip_base64(msg["text"])]
+            lines += _media_md(msg, media_base)
         elif role == "thinking":
             quoted = "\n".join("> " + l for l in msg["text"].splitlines())
             lines += ["", "> **[thinking]**", quoted]
@@ -151,6 +153,57 @@ def render_markdown(session, messages, redact_secrets=True, include_thinking=Fal
         head, sep, body = md.partition("\n---\n")
         md = head + "\n" + "\n".join(man) + body if sep else md + "\n".join(man)
     return md
+
+
+def clipboard_html(session, messages, include_tools=False, include_thinking=False,
+                   redact_secrets=True):
+    """Inline-styled HTML for the pasteboard — web apps strip <style> blocks on
+    paste, so every style is an attribute. Escape-first; no raw HTML passes."""
+    def clean(t):
+        t = _strip_base64(t or "")
+        return redact(t) if redact_secrets else t
+    P = 'margin:0 0 10px;font:14px/1.45 -apple-system,sans-serif;color:#1a1a1a'
+    LBL = 'font-weight:600;color:#b45309'
+    LBL_U = 'font-weight:600;color:#555'
+    TOOL = ('margin:0 0 8px;padding:6px 10px;background:#f5f5f4;border-radius:6px;'
+            'font:12px/1.4 ui-monospace,monospace;color:#555')
+    out = [f'<div style="{P}"><b>{_esc(session.get("title", ""))}</b></div>']
+    for m in messages:
+        r = m["role"]
+        if r == "thinking" and not include_thinking:
+            continue
+        if r == "tool":
+            if not include_tools:
+                continue
+            head = _esc(truncate_middle(clean(m.get("input") or ""), 300))
+            out.append(f'<div style="{TOOL}">⚙ {_esc(m.get("name", "?"))} {head}</div>')
+            continue
+        text = clean(m.get("text") or "")
+        if not text.strip():
+            continue
+        who = ('You', LBL_U) if r == "user" else \
+              (('Thinking', LBL_U) if r == "thinking" else ('Assistant', LBL))
+        body = _esc(text).replace("\n", "<br>")
+        out.append(f'<p style="{P}"><span style="{who[1]}">{who[0]}:</span> {body}</p>')
+    return "".join(out)
+
+
+def _media_md(msg, media_base):
+    """![pasted image](…) lines for a message's uploaded inline images."""
+    if not media_base:
+        return []
+    return [f"\n![pasted image]({media_base}/{m['name']})"
+            for m in msg.get("media") or [] if m.get("name")]
+
+
+def _media_html(msg, inline=True):
+    """<img> tags for a message's images — relative names resolve inside the
+    bundle (/b/<id>/mN.png), so the reader page needs no absolute URLs."""
+    if not inline:
+        return ""
+    imgs = [m["name"] for m in msg.get("media") or [] if m.get("name")]
+    return "".join(f'<img class="pasted" src="{_esc(n)}" alt="pasted image" loading="lazy">'
+                   for n in imgs)
 
 
 def _esc(text):
@@ -236,6 +289,7 @@ main { max-width:46rem; margin:0 auto; padding-top:10px; }
   display:flex; align-items:center; justify-content:center; margin-top:2px; }
 .turn .body { min-width:0; white-space:pre-wrap; overflow-wrap:break-word; padding-top:2px; }
 .turn.you { justify-content:flex-end; }
+img.pasted { display:block; max-width:100%; border-radius:10px; margin:8px 0 2px; }
 .turn.you .body { background:var(--bubble); border-radius:14px 14px 4px 14px;
   padding:11px 15px; max-width:85%; }
 details.steps { margin:14px 0 14px 38px; border:none; }
@@ -279,7 +333,7 @@ footer { max-width:46rem; margin:48px auto 0; color:var(--dim); font-size:0.76re
 def render_html(session, messages, redact_secrets=True, include_thinking=False,
                 messages_only=False, artifact_links=None, read_files=None, card="",
                 tool_output_limit=2000, tool_input_limit=800,
-                mode_label="human", expiry_label=""):
+                mode_label="human", expiry_label="", with_media=True):
     """Reader page: the conversation as a chat, agent work folded between turns."""
     src_label = "Claude Code" if session["source"] == "claude" else "Codex"
     logo = _LOGOS["claude" if session["source"] == "claude" else "codex"]
@@ -315,13 +369,15 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
             if not (msg.get("text") or "").strip():
                 continue
             flush_steps()
-            parts.append(f'<div class="turn you"><div class="body">{_esc(clean(msg["text"]))}</div></div>')
+            parts.append(f'<div class="turn you"><div class="body">{_esc(clean(msg["text"]))}'
+                         f'{_media_html(msg, with_media)}</div></div>')
         elif role == "assistant":
             if not (msg.get("text") or "").strip():
                 continue
             flush_steps()
             parts.append(f'<div class="turn" id="turn-{len(parts)}"><div class="av">{logo}</div>'
-                         f'<div class="body md">{_md_to_html(clean(msg["text"]))}</div></div>')
+                         f'<div class="body md">{_md_to_html(clean(msg["text"]))}'
+                         f'{_media_html(msg, with_media)}</div></div>')
         elif role == "thinking":
             if not (msg.get("text") or "").strip():
                 continue  # empty thinking renders as a dead panel — drop it

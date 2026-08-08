@@ -125,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     // MARK: panel
     func buildPanel() {
-        let size = NSSize(width: 700, height: 540)
+        let size = NSSize(width: 620, height: 460)
         panel = KeyPanel(contentRect: NSRect(origin: .zero, size: size),
                          styleMask: [.borderless, .nonactivatingPanel],
                          backing: .buffered, defer: false)
@@ -187,6 +187,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let pb = NSPasteboard.general
             pb.clearContents()
             pb.writeObjects(files as [NSPasteboardWriting])
+        case "copyRich":
+            // one text item carrying three flavors of the SAME content — the
+            // receiving app picks: html (Slack/Gmail), rtf (Mail/Notes),
+            // plaintext = the markdown itself (editors/terminal)
+            let html = dict["html"] as? String ?? ""
+            let markdown = dict["markdown"] as? String ?? ""
+            let images = (dict["images"] as? [String] ?? []).map { URL(fileURLWithPath: $0) }
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            var items: [NSPasteboardWriting] = []
+            let text = NSPasteboardItem()
+            if !html.isEmpty {
+                text.setString(html, forType: .html)
+                if let attr = NSAttributedString(html: Data(html.utf8), documentAttributes: nil),
+                   let rtf = attr.rtf(from: NSRange(location: 0, length: attr.length),
+                                      documentAttributes: [:]) {
+                    text.setData(rtf, forType: .rtf)
+                }
+            }
+            text.setString(markdown.isEmpty ? html : markdown, forType: .string)
+            items.append(text)
+            for img in images {   // separate items: apps inline or attach natively
+                if let data = try? Data(contentsOf: img) {
+                    let it = NSPasteboardItem()
+                    let type: NSPasteboard.PasteboardType =
+                        img.pathExtension.lowercased() == "png" ? .png
+                        : NSPasteboard.PasteboardType("public.jpeg")
+                    it.setData(data, forType: type)
+                    items.append(it)
+                }
+            }
+            items.append(contentsOf: files as [NSPasteboardWriting])
+            pb.writeObjects(items)
         case "quickLook":
             qlFiles = files
             if let ql = QLPreviewPanel.shared() {

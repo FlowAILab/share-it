@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 
 USER_AGENT = "share-it/0.1 (local session viewer)"
-EXPORT_SCHEMA_VERSION = 4  # v4: hosted R2 backend only
+EXPORT_SCHEMA_VERSION = 5  # v5: bundle shares (media + files under one id)
 EXPIRES_HOURS = 0  # default: no expiry (public object)
 STATE_DIR = os.path.expanduser("~/.shareit")
 SHARES_PATH = os.path.join(STATE_DIR, "shares.json")
@@ -111,6 +111,70 @@ def _up_hosted(body, ctype, expires_hours, name=""):
 
 
 
+def _bundle_call(path_part, data=None, headers=None, method="POST"):
+    hosted = _hosted_config()
+    if not hosted:
+        raise OSError("hosted uploader not configured")
+    h = {"X-Share-Token": hosted["token"]}
+    h.update(headers or {})
+    status, body = _http(hosted["url"].rstrip("/") + path_part, data=data,
+                         method=method, headers=h)
+    return status, body
+
+
+def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=None):
+    """Commit-semantics multi-object share.
+
+    objects: [{name, data(bytes), content_type}] — index included. All upload
+    concurrently; manifest.json is written LAST (the commit). Any failure
+    aborts loudly, listing exactly what failed, and clears staging.
+    """
+    if bundle_id is None:
+        bundle_id = new_bundle_id()
+    hosted = _hosted_config()
+    base = hosted["url"].rstrip("/")
+    from concurrent.futures import ThreadPoolExecutor
+
+    def put(o):
+        try:
+            status, _ = _bundle_call(f"/bundle/{bundle_id}/{o['name']}", data=o["data"],
+                                     headers={"Content-Type": o["content_type"],
+                                              "Content-Length": str(len(o["data"]))})
+            return o["name"] if status != 200 else None
+        except OSError:
+            return o["name"]
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        failed = [f for f in pool.map(put, objects) if f]
+    if failed:
+        try:
+            _bundle_call(f"/b/{bundle_id}", method="DELETE")  # best-effort staging cleanup
+        except OSError:
+            pass
+        raise OSError(f"upload failed for: {', '.join(failed)} — nothing was shared")
+    manifest = {"index": index_name, "hours": expires_hours,
+                "objects": [{"name": o["name"], "size": len(o["data"])} for o in objects]}
+    status, body = _bundle_call(f"/bundle/{bundle_id}/commit",
+                                data=json.dumps(manifest).encode(),
+                                headers={"Content-Type": "application/json"})
+    if status != 200:
+        try:
+            _bundle_call(f"/b/{bundle_id}", method="DELETE")
+        except OSError:
+            pass
+        raise OSError(f"share commit failed ({status}) — nothing was shared")
+    out = json.loads(body)
+    return {"url": out["url"], "provider": "hosted", "ref": f"b/{bundle_id}",
+            "hours": out["hours"]}
+
+
+def new_bundle_id():
+    status, body = _bundle_call("/bundle/new")
+    if status != 200:
+        raise OSError(f"bundle create failed ({status})")
+    return json.loads(body)["id"]
+
+
 def upload(text, expires_hours=EXPIRES_HOURS, fmt="md"):
     suffix = ".html" if fmt == "html" else ".md"
     ctype = ("text/html; charset=utf-8" if fmt == "html"
@@ -168,7 +232,23 @@ def _src_mtime(session, artifact=None):
         return session.get("mtime", 0)
 
 
-def record_share(session, result, opts, size, artifact=None):
+def _snapshot(paths):
+    """sha256+size of each file at share time — what the link actually carried."""
+    import hashlib
+    out = []
+    for p in paths or []:
+        try:
+            h = hashlib.sha256()
+            with open(p, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            out.append({"path": p, "sha256": h.hexdigest(), "size": os.path.getsize(p)})
+        except OSError:
+            out.append({"path": p, "sha256": None, "size": None})
+    return out
+
+
+def record_share(session, result, opts, size, artifact=None, file_paths=None):
     entry = {
         "url": result["url"], "provider": result["provider"], "ref": result["ref"],
         "title": (os.path.basename(artifact) if artifact else session["title"]),
@@ -184,6 +264,8 @@ def record_share(session, result, opts, size, artifact=None):
         "export_v": EXPORT_SCHEMA_VERSION,
         "messages_only": bool(opts.get("messages_only")),
         "thinking": bool(opts.get("thinking")), "size": size, "deleted": False,
+        "snapshot": _snapshot(file_paths if file_paths is not None
+                              else ([artifact] if artifact else [])),
     }
     with _LOCK:
         shares = load_shares()

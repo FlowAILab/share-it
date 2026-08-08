@@ -294,12 +294,10 @@ def _effective_files(session, opts):
             raise ValueError("selection exceeds the 100MB bundle cap — drop some files")
         return picked
     if opts.get("mode") == "deep":
-        arts = arts + [{**r, "kind": "referenced"}
-                       for r in adapters.by_id(session["source"]).reads(
-                           session["path"], cwd=session.get("cwd") or None)
-                       if r.get("size") is not None and r["size"] <= parsers.ARTIFACT_MAX_BYTES
-                       and not any(a["path"] == r["path"] for a in arts)]
-    else:
+        # deep carries created+modified; READ files ship as a path manifest in
+        # the export, raw contents only when explicitly selected (leak safety)
+        pass
+    if opts.get("mode") != "deep":
         created = [a for a in arts if a["kind"] == "created"]
         try:
             _, last = _peek_texts(session["path"], session["mtime"])
@@ -308,7 +306,14 @@ def _effective_files(session, opts):
         # rank across created AND modified — the deliverable the final answer
         # names can be a modified source file; the fallback stays created-only
         prim = set(_primary_paths(arts, last))
-        arts = [a for a in arts if a["path"] in prim] or created
+        picked = [a for a in arts if a["path"] in prim] or created
+        if not picked and opts.get("mode") in ("agent", "deep"):
+            # coding task with no created deliverable: the change IS the point —
+            # carry up to 5 meaningful modified source files (human mode: none)
+            picked = [a for a in arts
+                      if a["kind"] == "modified" and _MEANINGFUL_EXT.search(a["path"])
+                      and not _TEMPISH.search(a["path"])][:5]
+        arts = picked
     budget = 100_000_000  # total bundle cap — defaults degrade, selections error above
     kept = []
     for a in arts:
@@ -340,6 +345,90 @@ def _artifact_links(session, opts, upload=True):
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=6) as pool:
         return list(pool.map(resolve, arts))
+
+
+def _safe_obj_name(name, taken):
+    """Worker-legal object name, unique inside the bundle."""
+    base = re.sub(r"[^A-Za-z0-9._-]", "_", name)[:60] or "file"
+    cand, n = base, 2
+    while cand in taken or cand == "manifest.json":
+        cand, n = f"{n}-{base}", n + 1
+    taken.add(cand)
+    return cand
+
+
+def _assemble_bundle(path, opts):
+    """Build the complete share: index doc + inline media + selected files.
+
+    Returns (session, objects, index_name, card, shared_paths, media_count).
+    Raises ValueError with a human message when the selection can't ship.
+    """
+    import mimetypes
+    import media as _media
+    session = _session_entry(path)
+    adapter = adapters.by_id(session["source"])
+    messages = adapter.parse(path)
+    files = _effective_files(session, opts) if opts.get("artifacts") else []
+    media_objs = _media.collect(messages)   # annotates messages' media names
+    taken = {"manifest.json"} | {m["name"] for m in media_objs}
+    index_name = "chat.html" if opts.get("fmt") == "html" else "chat.md"
+    taken.add(index_name)
+
+    fobjs, artifact_links, shared_paths = [], [], []
+    for a in files:
+        try:
+            with open(a["path"], "rb") as fh:
+                data = fh.read()
+        except OSError:
+            artifact_links.append({**a, "url": None})
+            continue
+        obj = _safe_obj_name(a["name"], taken)
+        ct = mimetypes.guess_type(a["name"])[0] or "application/octet-stream"
+        fobjs.append({"name": obj, "data": data, "content_type": ct})
+        artifact_links.append({**a, "url": obj})   # relative — absolutized below
+        shared_paths.append(a["path"])
+
+    stats = parsers.session_stats(path, messages)
+    card = render.share_card(session, stats, len(shared_paths))
+    if opts["redact"]:
+        card = render.redact(card)
+    reads = []
+    if opts.get("mode") == "deep":
+        reads = adapter.reads(path, cwd=session.get("cwd") or None)
+    return session, messages, media_objs, fobjs, artifact_links, \
+        index_name, card, shared_paths, stats, reads
+
+
+def _render_index(session, messages, opts, artifact_links, stats, reads, media_base):
+    """The bundle's index document (chat.md / chat.html)."""
+    deep = opts.get("mode") == "deep"
+    expiry_label = ("no expiry" if opts["expires_hours"] == 0
+                    else "expires tomorrow" if opts["expires_hours"] == 24
+                    else f"expires in {opts['expires_hours'] // 24}d")
+    links = [{**a, "url": (f"{media_base}/{a['url']}" if a.get("url") else None)}
+             for a in artifact_links]
+    card = render.share_card(session, stats, sum(1 for a in links if a["url"]))
+    if opts["redact"]:
+        card = render.redact(card)
+    if opts.get("fmt") == "html":
+        return render.render_html(
+            session, messages, redact_secrets=opts["redact"],
+            include_thinking=opts["thinking"], messages_only=opts["messages_only"],
+            tool_output_limit=10000 if deep else 2000,
+            tool_input_limit=4000 if deep else 800,
+            artifact_links=links or None, card=card,
+            mode_label=opts["mode"], expiry_label=expiry_label)
+    last_request = next((m["text"] for m in reversed(messages)
+                         if m["role"] == "user" and m["text"].strip()), "")
+    return render.render_markdown(
+        session, messages, redact_secrets=opts["redact"],
+        include_thinking=opts["thinking"], messages_only=opts["messages_only"],
+        tool_output_limit=10000 if deep else 1200,
+        tool_input_limit=4000 if deep else 500,
+        artifact_links=links or None, stats=stats, mode=opts["mode"],
+        last_request=last_request, cwd=session.get("cwd") or None,
+        expiry_label=expiry_label, media_base=media_base,
+        read_files=reads or None)
 
 
 def _render_md(path, opts, upload_artifacts=False):
@@ -564,20 +653,78 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json({"url": cached["url"], "size": cached["size"],
                                            "cached": True, "provider": cached["provider"],
                                            "expires": cached["expires"], "card": card})
-                session, md, card = _render_md(path, opts,
-                                               upload_artifacts=route == "/api/share")
+                (session, messages, media_objs, fobjs, artifact_links,
+                 index_name, card, shared_paths, stats, reads) = _assemble_bundle(path, opts)
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
             if route == "/api/preview":
+                md = _render_index(session, messages, opts, artifact_links,
+                                   stats, reads, media_base=None)
                 return self._json({"markdown": md, "card": card})
             try:
-                result = share.upload(md, expires_hours=opts["expires_hours"],
-                                      fmt=opts["fmt"])
-            except Exception as e:  # network errors surface to the UI
-                return self._json({"error": f"upload failed: {e}"}, 502)
-            entry = share.record_share(session, result, opts, len(md))
-            return self._json({"url": entry["url"], "size": len(md), "card": card,
-                               "provider": entry["provider"], "expires": entry["expires"]})
+                bundle_id = share.new_bundle_id()
+                media_base = share._hosted_config()["url"].rstrip("/") + f"/b/{bundle_id}"
+                doc = _render_index(session, messages, opts, artifact_links,
+                                    stats, reads, media_base=media_base)
+                ct = ("text/html; charset=utf-8" if opts["fmt"] == "html"
+                      else "text/markdown; charset=utf-8")
+                objects = ([{"name": index_name, "data": doc.encode(), "content_type": ct}]
+                           + media_objs + fobjs)
+                result = share.upload_bundle(objects, index_name,
+                                             expires_hours=opts["expires_hours"],
+                                             bundle_id=bundle_id)
+            except Exception as e:  # nothing was shared — the client hears exactly why
+                return self._json({"error": f"share failed: {e}"}, 502)
+            entry = share.record_share(session, result, opts, len(doc),
+                                       file_paths=shared_paths)
+            return self._json({"url": entry["url"], "size": len(doc), "card": card,
+                               "provider": entry["provider"], "expires": entry["expires"],
+                               "n_files": len(shared_paths), "n_images": len(media_objs)})
+        if route == "/api/copy_chat":
+            # everything the rich clipboard needs: html + markdown flavors of the
+            # SAME content, plus image files (metadata-stripped) and selected files
+            path = body.get("path", "")
+            if not _allowed(path):
+                return self._json({"error": "invalid path"}, 400)
+            opts = _render_opts(body)
+            try:
+                import media as _media
+                session = _session_entry(path)
+                adapter = adapters.by_id(session["source"])
+                messages = adapter.parse(path)
+                files = _effective_files(session, opts) if opts.get("artifacts") else []
+                media_objs = _media.collect(messages)
+                exp_dir = os.path.expanduser("~/.shareit/exports/clip")
+                os.makedirs(exp_dir, exist_ok=True)
+                img_paths = []
+                for m in media_objs:
+                    p = os.path.join(exp_dir, m["name"])
+                    with open(p, "wb") as fh:
+                        fh.write(m["data"])
+                    img_paths.append(p)
+                include_tools = opts["mode"] != "human"
+                html = render.clipboard_html(session, messages,
+                                             include_tools=include_tools,
+                                             include_thinking=opts["thinking"],
+                                             redact_secrets=opts["redact"])
+                stats = parsers.session_stats(path, messages)
+                last_request = next((m["text"] for m in reversed(messages)
+                                     if m["role"] == "user" and m["text"].strip()), "")
+                md = render.render_markdown(
+                    session, messages, redact_secrets=opts["redact"],
+                    include_thinking=opts["thinking"],
+                    messages_only=opts["messages_only"],
+                    stats=stats, mode=opts["mode"], last_request=last_request,
+                    cwd=session.get("cwd") or None)
+                n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
+                             and (m.get("text") or "").strip())
+                return self._json({"html": html, "markdown": md,
+                                   "images": img_paths,
+                                   "files": [a["path"] for a in files
+                                             if os.path.isfile(a["path"])],
+                                   "messages": n_msgs})
+            except (OSError, ValueError, KeyError) as e:
+                return self._json({"error": str(e)}, 400)
         if route in ("/api/file/copy", "/api/file/reveal", "/api/file/open", "/api/file/preview"):
             path, files = body.get("path", ""), body.get("files") or []
             if not _allowed(path) or not files:
@@ -709,6 +856,11 @@ def _peek_texts(path, mtime):
                 del _peekmem[k]
     return msgs, last
 
+
+# what counts as a hand-authored source/doc file for the modified-files rule
+_MEANINGFUL_EXT = re.compile(
+    r"\.(py|js|jsx|ts|tsx|swift|go|rs|rb|java|kt|c|h|cc|cpp|hpp|m|mm|cs|php|sh|zsh|bash|"
+    r"sql|html|css|scss|vue|svelte|md|rst|txt|yaml|yml|toml|json|proto|graphql|tf)$", re.I)
 
 _TEMPISH = re.compile(
     r"(^|/)(node_modules|__pycache__|dist|build|target|\.wrangler|\.git|\.venv|venv)(/|$)"
