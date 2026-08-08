@@ -39,7 +39,8 @@ body.browser #panel {
   font: 300 21px -apple-system, system-ui, sans-serif; caret-color: var(--ink);
 }
 #q::placeholder { color: var(--faint); }
-#q:focus-visible { box-shadow: 0 1px 0 var(--dim); }
+#q { border-bottom: 1px solid transparent; }
+#q:focus-visible { border-image: linear-gradient(90deg, transparent, rgba(217,130,95,0.35), rgba(255,255,255,0.14), transparent) 1; border-bottom: 1px solid; box-shadow: none; }
 .seg span:focus-visible, .tog:focus-visible, .iconbtn:focus-visible, .rowshare:focus-visible {
   outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
 .tog, .seg span { min-height: 24px; display: inline-flex; align-items: center; }
@@ -260,9 +261,9 @@ function smartCopy() {
   if (expanded === s.path && s._sel?.size) {  // chips selected → real files
     const files = [...s._sel];
     if (nativeCmd("copyFiles", files))
-      toast(`${files.length} file${files.length > 1 ? "s" : ""} copied — paste in Finder or any app`);
+      toast(`Copied ${files.length} file${files.length > 1 ? "s" : ""} — paste in Finder or any app`);
     else api("/api/file/copy", {path: s.path, files})
-      .then((d) => toast(`${d.count} file${d.count > 1 ? "s" : ""} copied — paste in Finder or any app`))
+      .then((d) => toast(`Copied ${d.count} file${d.count > 1 ? "s" : ""} — paste in Finder or any app`))
       .catch((err) => toast(err.message));
     return true;
   }
@@ -297,11 +298,11 @@ function menuItemsFor(s) {
     const sh = visibleShares()[sel];
     if (!sh) return [];
     const items = [
-      {t: "Copy Link", k: "⌘C", run: () => { copyText(sh.url); toast("link copied"); }},
+      {t: "Copy Link", k: "⌘C", run: () => { copyText(sh.url); toast("Link copied"); }},
       {t: "Copy for Agent", run: () => { copyText(
         "Continue this task from the shared session below. Preserve prior decisions, "
         + "inspect the included files and begin with the last unresolved request:\n\n" + sh.url);
-        toast("agent handoff copied"); }},
+        toast("Agent handoff copied"); }},
       {t: "Open", run: () => api("/api/open_url", {url: sh.url}).catch((e) => toast(e.message))},
     ];
     if (sh.provider === "hosted")
@@ -326,7 +327,7 @@ function menuItemsFor(s) {
     {t: "Deep — adds reasoning", run: () => {
       if (!localStorage.getItem("shareit-deep-warned")) {
         localStorage.setItem("shareit-deep-warned", "1");
-        toast("Deep shares reasoning, detailed tool output and more files — review before sending.");
+        toast("Deep adds reasoning and detailed tool output — review before sending.");
       }
       doShare(s, "deep");
     }},
@@ -352,7 +353,7 @@ function menuItemsFor(s) {
   if (ot) items.push({t: `Open in ${ot}`, k: "⌥⏎", run: () => doResume(s)});
   items.push({t: "Reveal in Finder", run: () =>
     api("/api/file/reveal", {path: s.path, files: [fp[0] || s.path]})
-      .then(() => toast("revealed in Finder")).catch((e) => toast(e.message))});
+      .then(() => toast("Revealed in Finder")).catch((e) => toast(e.message))});
   return items;
 }
 
@@ -382,7 +383,7 @@ async function copySession(s, modeOverride, extraFiles) {
         + (n ? ` · +${n} file${n > 1 ? "s" : ""}` : ""));
     } else {
       await copyText(d.file);
-      toast(`saved ${d.name} — path copied (browser mode)`);
+      toast(`Saved ${d.name} — path copied (browser mode)`);
     }
   } catch (e) { toast(e.message); }
 }
@@ -569,19 +570,18 @@ function renderOpts() {
       title="${opts.card ? "stat card copied with the link — click for link only" : "copy a stat card (model · turns · files) with the link"}">
       <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="1.5" y="2.5" width="9" height="7" rx="1.5"/><path d="M3.5 5h5M3.5 7h3"/></svg><span class="lbl">stat card</span></span>` : ""}
     ${opts.adv ? '<span role="button" tabindex="0" class="tog icon" id="reset" title="reset options to defaults">↺<span class="lbl">reset</span></span>' : ""}
-    <span class="share-meta" style="margin-left:auto" title="what a share will contain">${opts.mode} · ${opts.expiry === 0 ? "no expiry" : opts.expiry === 24 ? "1d" : opts.expiry / 24 + "d"}${opts.redact ? "" : " · RAW"}</span>
-    ${opts.redact ? "" : '<span class="warn-note">⚠ verbatim</span>'}`;
+    ${opts.redact ? "" : '<span class="warn-note" style="margin-left:auto">⚠ verbatim</span>'}`;
   $("#adv").addEventListener("click", () => { opts.adv = !opts.adv; saveOpts(); renderOpts(); });
   $("#reset")?.addEventListener("click", () => {
     Object.assign(opts, { mode: "agent", expiry: 0, redact: true, card: false, adv: true });
-    optsChanged(); toast("options reset");
+    optsChanged(); toast("Options reset");
   });
   $("#opts").querySelectorAll(".seg span").forEach((el) => el.addEventListener("click", () => {
     const k = el.parentElement.dataset.k;
     opts[k] = k === "expiry" ? +el.dataset.v : el.dataset.v;
     if (opts.mode === "deep" && !localStorage.getItem("shareit-deep-warned")) {
       localStorage.setItem("shareit-deep-warned", "1");
-      toast("Deep shares reasoning, detailed tool output and more files — review before sending.");
+      toast("Deep adds reasoning and detailed tool output — review before sending.");
     }
     optsChanged();
   }));
@@ -652,7 +652,7 @@ function renderList() {
        {
          const cur = vis[sel];
          const openHint = cur && openTargetFor(cur) ? ` · <kbd>⌥⏎</kbd> open in ${openTargetFor(cur)}` : "";
-         return `<kbd>⌘C</kbd> copy session · <kbd>⌘K</kbd> actions · <kbd>→</kbd> peek${openHint}`;
+         return `<kbd>⌘C</kbd> copy chat · <kbd>⌘K</kbd> actions · <kbd>→</kbd> peek${openHint}`;
        }
      })()}</span>`;
   const lnk = list.querySelector("#lnk[data-fresh]");
@@ -697,7 +697,7 @@ $("#list").addEventListener("click", (ev) => {
     }
     if (ev.altKey) {  // ⌥-click: reveal in Finder
       api("/api/file/reveal", {path: s.path, files: [art.dataset.art]})
-        .then(() => toast("revealed in Finder")).catch((e) => toast(e.message));
+        .then(() => toast("Revealed in Finder")).catch((e) => toast(e.message));
       return;
     }
     s._sel = s._sel || new Set();
@@ -732,7 +732,7 @@ $("#list").addEventListener("click", (ev) => {
     copyText("Continue this task from the shared session below. Preserve prior decisions, "
       + "inspect the included files and begin with the last unresolved request:\n\n"
       + agentBtn.dataset.agentcopy);
-    toast("agent handoff copied");
+    toast("Agent handoff copied");
     return;
   }
   const openBtn = t.closest("[data-open]");
@@ -891,11 +891,11 @@ async function toggle(s) {
 async function copyLastAnswer(s) {
   try {
     const d = await api("/api/last_answer?path=" + encodeURIComponent(s.path));
-    if (!d.answer) return toast("no assistant answer found");
+    if (!d.answer) return toast("No assistant answer found");
     await copyText(d.answer);
     toast(d.code_blocks.length
-      ? `last answer copied (${d.code_blocks.length} code block${d.code_blocks.length > 1 ? "s" : ""} inside)`
-      : "last answer copied");
+      ? `Answer copied (${d.code_blocks.length} code block${d.code_blocks.length > 1 ? "s" : ""} inside)`
+      : "Answer copied");
   } catch (e) { toast(e.message); }
 }
 
@@ -914,9 +914,9 @@ function appLogo(s) { return GLYPHS[s.app] || GLYPHS["claude-code"]; }
 async function doResume(s) {
   try {
     const d = await api("/api/resume", {path: s.path});
-    if (d.app) toast("opening in " + (d.target || "the app"));
-    else if (d.launched) toast("opened — running in Terminal");
-    else { await copyText(d.command); toast("command copied — paste in your terminal"); }
+    if (d.app) toast("Opening in " + (d.target || "the app"));
+    else if (d.launched) toast("Opened in Terminal");
+    else { await copyText(d.command); toast("Command copied — paste in your terminal"); }
   } catch (e) { toast(e.message); }
 }
 
@@ -1180,7 +1180,7 @@ document.addEventListener("keydown", (e) => {
              && !window.getSelection()?.toString())) {
       e.preventDefault();
       const s = live[sel];
-      if (s) { copyText(s.url); toast("link copied"); }
+      if (s) { copyText(s.url); toast("Link copied"); }
     } else if (e.key === "Escape") {
       e.preventDefault();
       if ($("#q").value) { $("#q").value = ""; render(); }
