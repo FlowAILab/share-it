@@ -581,11 +581,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "/api/health":
             self._json({"app": "share-it", "version": VERSION})
-        elif route == "/api/verify":   # token already checked by _guard
-            self._json({"ok": True})
         elif route == "/":
             with open(os.path.join(STATIC_DIR, "index.html"), "rb") as fh:
                 data = fh.read()
+            if not os.environ.get("SHAREIT_TOKEN"):  # dev (no shell): browser needs it
+                data = data.replace(b"</head>",
+                    b'<script>window.__SHAREIT_TOKEN=' +
+                    json.dumps(TOKEN).encode() + b';</script></head>', 1)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
@@ -697,10 +699,11 @@ class Handler(BaseHTTPRequestHandler):
                 if cached:
                     return self._json({"url": cached["url"], "cached": True,
                                        "provider": cached["provider"], "expires": cached["expires"]})
-                pre = os.path.getsize(file)
+                pre_size = os.path.getsize(file)
+                pre_mt = os.path.getmtime(file)   # capture BEFORE upload
                 result = share.upload_file(file, expires_hours=opts["expires_hours"])
-                entry = share.record_share(session, result, opts, pre, artifact=file,
-                                           src_mtime=os.path.getmtime(file))
+                entry = share.record_share(session, result, opts, pre_size, artifact=file,
+                                           src_mtime=pre_mt)
                 return self._json({"url": entry["url"], "provider": entry["provider"],
                                    "expires": entry["expires"]})
             except (OSError, ValueError, KeyError) as e:
@@ -1075,6 +1078,23 @@ def _write_token():
         fh.write(TOKEN)
 
 
+READY_PATH = os.path.expanduser("~/.shareit/ready")
+
+
+def _signal_ready():
+    """After a successful bind, write the shell's nonce so it knows WE own the
+    port (a squatter that grabbed it first makes bind fail — we never get here)."""
+    nonce = os.environ.get("SHAREIT_READY")
+    if not nonce:
+        return
+    try:
+        fd = os.open(READY_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(nonce)
+    except OSError:
+        pass
+
+
 def main():
     _write_token()
     _fix_state_perms()
@@ -1089,6 +1109,7 @@ def main():
     except OSError:
         print(f"share-it: port {PORT} is already in use — is another instance running?")
         raise SystemExit(1)
+    _signal_ready()  # bind succeeded → tell the shell it's really us
     url = f"http://127.0.0.1:{PORT}"
     print(f"share-it running at {url}")
     if "--no-browser" not in sys.argv:

@@ -137,6 +137,7 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
         bundle_id = new_bundle_id()
     hosted = _hosted_config()
     base = hosted["url"].rstrip("/")
+    del_key = secrets.token_urlsafe(16)  # set before _abort so rollback carries it
     from concurrent.futures import ThreadPoolExecutor
 
     def put(o):
@@ -149,8 +150,9 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
             return o["name"]
 
     def _abort(reason):
-        try:  # best-effort staging cleanup — the daily sweep is the backstop
-            _bundle_call(f"/b/{bundle_id}", method="DELETE")
+        try:  # best-effort cleanup — with the delKey in case commit already landed
+            _bundle_call(f"/b/{bundle_id}", method="DELETE",
+                         headers={"X-Del-Key": del_key})
         except Exception:
             pass
         err = OSError(f"{reason} — nothing was shared")
@@ -162,7 +164,6 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
             failed = [f for f in pool.map(put, objects) if f]
         if failed:
             _abort(f"upload failed for: {', '.join(failed)}")
-        del_key = secrets.token_urlsafe(16)
         manifest = {"index": index_name, "hours": expires_hours, "delKey": del_key,
                     "objects": [{"name": o["name"], "size": len(o["data"])} for o in objects]}
         status, body = _bundle_call(f"/bundle/{bundle_id}/commit",
@@ -307,12 +308,12 @@ def find_cached(session, opts, artifact=None):
         # export_v gate FIRST — legacy records lack the fields dereferenced below
         if s.get("export_v") != EXPORT_SCHEMA_VERSION:
             continue
-        if (s["path"] == session["path"] and not s["deleted"]
+        if (s.get("path") == session["path"] and not s.get("deleted")
                 and s.get("artifact") == artifact
                 and s.get("src_mtime") == live_mtime
                 and s.get("req_hours") == opts.get("expires_hours", EXPIRES_HOURS)
-                and (s["expires"] is None or s["expires"] > now + 1800)
-                and s["redacted"] == bool(opts.get("redact", True))
+                and (s.get("expires") is None or s.get("expires", 0) > now + 1800)
+                and s.get("redacted") == bool(opts.get("redact", True))
                 and s.get("mode", "full") == opts.get("mode", "full")
                 and s.get("fmt", "md") == opts.get("fmt", "md")
                 and (artifact or s.get("art_mtime", 0) == opts.get("art_mtime", 0))

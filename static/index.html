@@ -595,8 +595,8 @@ function renderOpts() {
     <span role="button" tabindex="0" class="tog icon" id="adv" title="more options">⋯</span>
     ${opts.adv ? `
     <span role="button" tabindex="0" class="tog icon ${opts.redact ? "on" : ""}" data-t="redact"
-      title="${opts.redact ? "secrets hidden (best-effort scrub) — click to share verbatim" : "NOT redacted — click to hide secrets"}">
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M6 1 10.2 2.6v3C10.2 8.6 8.4 10.3 6 11 3.6 10.3 1.8 8.6 1.8 5.6v-3z"/></svg><span class="lbl">scrub secrets</span></span></span>
+      title="${opts.redact ? "transcript text scrubbed for secrets (files ship as-is) — click to share verbatim" : "NOT scrubbed — click to scrub transcript secrets"}">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M6 1 10.2 2.6v3C10.2 8.6 8.4 10.3 6 11 3.6 10.3 1.8 8.6 1.8 5.6v-3z"/></svg><span class="lbl">scrub text</span></span></span>
     <span role="button" tabindex="0" class="tog icon ${opts.card ? "on" : ""}" data-t="card"
       title="${opts.card ? "stat card copied with the link — click for link only" : "copy a stat card (model · turns · files) with the link"}">
       <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="1.5" y="2.5" width="9" height="7" rx="1.5"/><path d="M3.5 5h5M3.5 7h3"/></svg><span class="lbl">stat card</span></span>` : ""}

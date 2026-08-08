@@ -4,6 +4,7 @@ import AppKit
 import WebKit
 import Carbon.HIToolbox
 import Quartz
+import Security
 
 final class KeyPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -60,14 +61,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         return FileManager.default.currentDirectoryPath
     }
 
-    lazy var token: String = {
-        var b = [UInt8](repeating: 0, count: 24)
-        _ = SecRandomCopyBytes(kSecRandomDefault, b.count, &b)
+    func randToken(_ n: Int) -> String {
+        var b = [UInt8](repeating: 0, count: n)
+        if SecRandomCopyBytes(kSecRandomDefault, n, &b) != errSecSuccess {
+            b = (0..<n).map { _ in UInt8.random(in: 0...255) }  // checked fallback
+        }
         return Data(b).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
-    }()
+    }
+    lazy var token: String = randToken(24)
+    lazy var readyNonce: String = randToken(18)
 
     func pythonPath() -> String {
         // prefer the bundled standalone CPython (DMG); fall back to system python3 (dev)
@@ -89,30 +94,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             p.arguments = [backendDir() + "/app.py", "--no-browser"]
         }
         var env = ProcessInfo.processInfo.environment
-        env["SHAREIT_TOKEN"] = token   // the backend requires exactly this token
+        env["SHAREIT_TOKEN"] = token       // the backend requires exactly this token
+        env["SHAREIT_READY"] = readyNonce  // and signals readiness with this nonce
         p.environment = env
+        try? FileManager.default.removeItem(atPath: readyPath())  // clear any stale signal
         try? p.run()
         server = p
     }
 
+    func readyPath() -> String {
+        return (NSHomeDirectory() as NSString).appendingPathComponent(".shareit/ready")
+    }
+
     func waitForServer(attempts: Int) {
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/verify")!)
-        req.timeoutInterval = 0.5
-        req.setValue(token, forHTTPHeaderField: "X-Shareit-Token")  // proves it's OUR backend
+        // wait for OUR child to write its ready nonce after binding the port.
+        // We never transmit the token; a squatter can't bind, so it can never
+        // produce this file, and we bail instead of trusting it.
         func poll(_ left: Int) {
-            URLSession.shared.dataTask(with: req) { _, resp, _ in
-                let ok = (resp as? HTTPURLResponse)?.statusCode == 200
-                DispatchQueue.main.async {
-                    if ok {
-                        self.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(self.port)/")!))
-                        self.showPanel()
-                    } else if left > 0 {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { poll(left - 1) }
-                    } else {
-                        self.startupFailed()
-                    }
-                }
-            }.resume()
+            let ready = (try? String(contentsOfFile: readyPath(), encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if ready == readyNonce {
+                webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
+                showPanel()
+            } else if left > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { poll(left - 1) }
+            } else {
+                startupFailed()
+            }
         }
         poll(attempts)
     }

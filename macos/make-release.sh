@@ -4,6 +4,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# reproducible releases build from a clean tree — refuse a dirty checkout
+if [ -n "$(git status --porcelain 2>/dev/null | grep -v default_config.json)" ]; then
+  echo "working tree is dirty — commit or stash before cutting a release"; exit 1
+fi
+
 # --- pinned relocatable CPython (hash always verified) ---
 PY_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20250612/cpython-3.12.11+20250612-aarch64-apple-darwin-install_only.tar.gz"
 PY_SHA="c6d4843e8af496f034176908ae3384556680284653a4bff45eff07e43fe4ae34"

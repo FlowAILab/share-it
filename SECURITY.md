@@ -12,13 +12,19 @@ Share-It is local-first: session data never leaves your machine until you press 
 ## Local server
 
 The backend binds to `127.0.0.1:8749`. `/api/*` requires a per-launch token. The macOS
-shell **generates** the token, passes it to the Python backend it spawns via the
-`SHAREIT_TOKEN` environment variable, and injects it into its own WKWebView out-of-band
-(never over HTTP, so it can't be read from the page source). The shell then calls
-`/api/verify` with that token and only loads the UI / enables the native bridge if the
-server proves it holds the same token — so a process that squats port 8749 before launch
-cannot impersonate the backend. The bridge also ignores messages from any frame that isn't
-loopback. A token file (`~/.shareit/session_token`, mode `0600`) is written for dev/CLI use.
+shell **generates** the token and a separate readiness nonce, passes both to the Python
+backend it spawns (`SHAREIT_TOKEN`, `SHAREIT_READY` env vars), and injects the token into
+its own WKWebView out-of-band (never over HTTP, so it can't be read from the page source).
+
+The shell does **not** send the token to whatever answers on the port. Instead the backend
+writes the readiness nonce to `~/.shareit/ready` (mode `0600`) **only after it successfully
+binds the port**, and the shell waits for that exact nonce before loading the UI or enabling
+the native bridge. A process that squats port 8749 first makes the real backend's bind fail,
+so the ready nonce is never written and the app bails out rather than trusting the squatter —
+and a *different* user can neither read the spawned process's env nor write the `0600` file.
+The bridge additionally ignores messages from any frame whose origin isn't loopback. A token
+file (`~/.shareit/session_token`, `0600`) is written for direct `python3 app.py` dev use,
+where the page is injected the token in-process.
 
 ## Rendered content
 
@@ -29,9 +35,11 @@ set. Transcript text is treated as untrusted data, HTML-escaped at render time.
 
 ## Bundle deletion
 
-Deleting a hosted share requires a per-share `delKey` returned only to the creator at
-upload time — possession of the fleet upload token is **not** sufficient to delete someone
-else's link.
+Deleting a hosted **bundle** share (the default for every session share) requires a
+per-share `delKey` returned only to the creator at upload time — the fleet upload token
+alone cannot delete someone else's bundle. Legacy single-file `/p/` shares (older links and
+the standalone "share one file" action) are still token-gated only; they are being migrated
+to bundles.
 
 ## Known limitations (pre-1.0)
 

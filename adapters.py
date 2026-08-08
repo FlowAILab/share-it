@@ -136,9 +136,11 @@ class CursorAdapter(Adapter):
 
     def discover(self):
         out = []
-        for s in _cursor.discover():   # one DB scan total, not one per session
-            title = s.get("title") or "(untitled)"
-            out.append({"id": s["id"], "title": title, "cwd": "",
+        for s in _cursor.discover():   # one DB scan for the named majority
+            title = s.get("title")
+            if not title:              # unnamed → derive from first message (rare)
+                title, _ = _cursor.meta_for(s["id"])
+            out.append({"id": s["id"], "title": title or "(untitled)", "cwd": "",
                         "ts": s.get("ts") or 0})
         return out
 

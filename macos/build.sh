@@ -11,7 +11,7 @@ command -v swiftc >/dev/null || { echo "swiftc not found — install Xcode Comma
 
 echo "compiling…"
 swiftc -O main.swift -o share-it-bin \
-  -framework Cocoa -framework WebKit -framework Carbon -framework Quartz
+  -framework Cocoa -framework WebKit -framework Carbon -framework Quartz -framework Security
 
 echo "assembling ${DEST}…"
 rm -rf "$DEST"
