@@ -23,8 +23,8 @@
 
 Share-It indexes every **AI agent session** on your Mac — Claude Code, Codex, Cursor,
 Cowork — in one fast, local search. Find any chat and turn it into a shareable link in a
-single keystroke: the full conversation **and** the files the agent built. Send it to a
-teammate, or hand it to another agent to continue the work.
+single keystroke: the full conversation, the files the agent built, and the screenshots you
+pasted in. Send it to a teammate, or hand it to another agent to continue the work.
 
 ## Quickstart
 
@@ -35,19 +35,20 @@ teammate, or hand it to another agent to continue the work.
 
 ## Core
 
-- 🔗 **Share a link** — hit **⏎**, a short URL is on your clipboard.
+- 🔗 **Share a link** — hit **⏎**, a short URL lands on your clipboard: a clean reader page
+  for a teammate, or a handoff for another agent. Pasted screenshots come along.
 - 📋 **Copy the chat** — hit **⌘C**, it pastes formatted into Slack or Mail, and as clean
   markdown into your editor. Stays on your machine.
-- 📦 **Grab the files** — the PDFs, images, and code the agent made, ready to drop into
-  Finder, Slack, or email. Real files, not screenshots.
+- 📦 **Grab the files** — hit **⇧⌘C**, the PDFs, images, and code the agent made drop
+  straight into Finder, Slack, or email. Real files, not screenshots.
 
 ## Nice extras
 
 - 🧠 **Deep mode** — the reasoning, full tool output, and the files it created or changed,
   plus a manifest of everything it read, so another agent can pick up the thread.
+- ↩︎ **Open where you left off** — one key reopens the session right in Claude Code or Codex.
 - 🛟 **Nothing gets lost** — Claude wipes old sessions after ~30 days; Share-It quietly
   keeps them, and lets you search everything you've ever done.
-- **Reader mode** — a clean web page for humans, not raw markdown.
 - ⏳ **Your rules** — links last forever or 1 / 3 / 7 days, and vanish in one click.
 
 ## 🔒 Yours, always
