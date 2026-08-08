@@ -305,8 +305,10 @@ def _effective_files(session, opts):
             _, last = _peek_texts(session["path"], session["mtime"])
         except Exception:
             last = ""
-        prim = set(_primary_paths(created, last))
-        arts = [a for a in created if a["path"] in prim] or created
+        # rank across created AND modified — the deliverable the final answer
+        # names can be a modified source file; the fallback stays created-only
+        prim = set(_primary_paths(arts, last))
+        arts = [a for a in arts if a["path"] in prim] or created
     budget = 100_000_000  # total bundle cap — defaults degrade, selections error above
     kept = []
     for a in arts:
@@ -695,7 +697,7 @@ def _peek_texts(path, mtime):
                  for m in full if m.get("text", "").strip()
                  and m["role"] in ("user", "assistant")]
         msgs = texts[:6]
-        last = next((clip(" ".join(m["text"].split()), 480) for m in reversed(full)
+        last = next((clip(" ".join(m["text"].split()), 4000) for m in reversed(full)
                      if m["role"] == "assistant" and m.get("text", "").strip()), "")
     else:
         msgs = parsers.peek_session(path)

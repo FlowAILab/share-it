@@ -745,6 +745,7 @@ $("#list").addEventListener("contextmenu", (ev) => {
   const s = sessionAt(ev);
   if (!s) return;
   s._sel = s._sel || new Set();
+  if (!s._sel.has(artChip.dataset.art)) { s._selTouched = true; s._share = null; }
   s._sel.add(artChip.dataset.art);
   render();
   if (nativeCmd("quickLook", [artChip.dataset.art])) qlOpen = true;
@@ -913,6 +914,7 @@ async function shareSelectedArtifacts(s) {
     copyText(lines.join("\n"));
     files.forEach((f) => flashCopied(f));
     s._sel.clear();
+    s._share = null;  // session-link file set changed with the selection
   }
   render();
 }
