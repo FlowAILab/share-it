@@ -1,7 +1,7 @@
 <h1 align="center">Share-It</h1>
 
 <p align="center">
-  <b>Hand off any AI-coding session — with its output files — to another agent in one click.</b><br>
+  <b>Hand off any AI-coding session to another agent — files and all, in one click.</b><br>
   <sub>Works across Claude Code · Codex · Cursor · Cowork. Your sessions, one keystroke away.</sub>
 </p>
 
