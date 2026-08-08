@@ -588,7 +588,7 @@ function renderOpts() {
     <span role="group" class="seg" data-k="mode">
       <span role="button" tabindex="0" data-v="human" class="${opts.mode === "human" ? "on" : ""}" title="for people: a clean reader page — conversation + created files, no tool logs">human</span>
       <span role="button" tabindex="0" data-v="agent" class="${opts.mode === "agent" ? "on" : ""}" title="for agent handoff: markdown with a handoff manifest, abridged tool context + created files">agent</span>
-      <span role="button" tabindex="0" data-v="deep" class="${opts.mode === "deep" ? "on" : ""}" title="maximum context: reasoning, fuller tool output, plus modified/read project files (size-capped)">deep</span>
+      <span role="button" tabindex="0" data-v="deep" class="${opts.mode === "deep" ? "on" : ""}" title="maximum context: reasoning, fuller tool output, files it created or changed, plus a manifest of files it read">deep</span>
     </span>
     <span role="group" class="seg" data-k="expiry">${[[0,"∞"],[24,"1d"],[72,"3d"],[168,"7d"]].map(([h, l]) =>
       `<span role="button" tabindex="0" data-v="${h}" class="${opts.expiry === h ? "on" : ""}">${l}</span>`).join("")}</span>

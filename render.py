@@ -216,6 +216,16 @@ def _strip_image_token(text, msg):
     return text
 
 
+def _img_origin(media_base):
+    """scheme://host of the bundle, for the reader's img-src allowlist (the page
+    is sandboxed to an opaque origin, so 'self' no longer matches)."""
+    if not media_base:
+        return "data:"
+    from urllib.parse import urlparse
+    u = urlparse(media_base)
+    return f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else "'self'"
+
+
 def _media_html(msg, media_base=None):
     """<img> tags for a message's images. ABSOLUTE urls: the reader lives at
     /b/<id> (no trailing slash), so relative names would resolve to /b/mN.png
@@ -282,6 +292,9 @@ _LOGOS = {
     "claude": ('<svg viewBox="0 0 12 12" width="16" height="16" fill="none" '
                'stroke="#d97757" stroke-width="1.5" stroke-linecap="round">'
                '<path d="M6 1v10M1 6h10M2.6 2.6l6.8 6.8M9.4 2.6L2.6 9.4"/></svg>'),
+    "cursor": ('<svg viewBox="0 0 24 24" width="16" height="16" fill="none" '
+               'stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">'
+               '<path d="M12 2 21 7v10l-9 5-9-5V7z"/><path d="M12 2v10l9 5M12 12 3 7"/></svg>'),
     "codex": ('<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">'
               '<path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0'
               '-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 '
@@ -358,7 +371,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
                 mode_label="human", expiry_label="", media_base=None):
     """Reader page: the conversation as a chat, agent work folded between turns."""
     src_label = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}.get(session["source"], session["source"].title())
-    logo = _LOGOS["claude" if session["source"] == "claude" else "codex"]
+    logo = _LOGOS.get(session["source"], _LOGOS["codex"])
     date = time.strftime("%B %-d, %Y", time.localtime(session.get("last_used") or session.get("mtime") or time.time()))
 
     def clean(text):
@@ -440,7 +453,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
             f'<meta name="referrer" content="no-referrer">'
             "<meta http-equiv=\"Content-Security-Policy\" "
             "content=\"default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; "
-            "img-src 'self' data:\">"
+            f"img-src {_img_origin(media_base)} data:\">"
             f'<title>{_esc(title)}</title><style>{_HTML_CSS}</style></head><body>'
             f'<header><div class="logo">{logo}</div><div><h1>{_esc(title)}</h1>'
             f'<div class="meta">{src_label} · {date} · {mode_label}{" · " + _esc(expiry_label) if expiry_label else ""}'

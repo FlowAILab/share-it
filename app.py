@@ -22,7 +22,7 @@ import share
 
 PORT = 8749
 import secrets as _secrets
-TOKEN = _secrets.token_urlsafe(24)   # per-launch; the Swift shell reads it 0600
+TOKEN = os.environ.get("SHAREIT_TOKEN") or _secrets.token_urlsafe(24)  # shell-provided, else dev
 TOKEN_PATH = os.path.expanduser("~/.shareit/session_token")
 CACHE_PATH = os.path.expanduser("~/.shareit/index.json")
 ANNOT_PATH = os.path.expanduser("~/.shareit/annotations.json")
@@ -117,10 +117,12 @@ def _merge_annotations():
     min behind) still shows; the worker catches up within its 120s cycle."""
     for path, ent in _cache.items():
         rec = _annot.get(path)
-        if (rec and rec["v"] == ANNOT_VERSION
+        if not isinstance(rec, dict):
+            continue
+        rmt = rec.get("mtime")
+        if (rec.get("v") == ANNOT_VERSION and isinstance(rmt, (int, float))
                 and rec.get("cwd", "") == (ent.get("cwd") or "")
-                and (rec["mtime"] == ent["mtime"]
-                     or ent["mtime"] - rec["mtime"] <= 600)):
+                and (rmt == ent["mtime"] or ent["mtime"] - rmt <= 600)):
             _apply_annot(ent, rec)
 
 
@@ -131,7 +133,8 @@ def _load_cache():
             raw = json.load(fh)
         # tolerate a corrupt/legacy shape without crashing the index
         _cache = {k: v for k, v in raw.items()
-                  if isinstance(v, dict) and "mtime" in v and "source" in v} \
+                  if isinstance(v, dict) and isinstance(v.get("mtime"), (int, float))
+                  and isinstance(v.get("size"), int) and "source" in v} \
                  if isinstance(raw, dict) else {}
     except (OSError, json.JSONDecodeError, AttributeError):
         _cache = {}
@@ -264,20 +267,24 @@ def _text_head(path, limit=120):
 
 
 def _artifact_fingerprint(session, opts):
-    """Hash of the (path, size, mtime) set a share would include — any deletion,
-    addition or edit changes it, so a stale bundle can never be served as cached."""
+    """Content hash of the file set a share would include — deletion, addition
+    or ANY edit (even one that restores size+mtime) changes it, so a stale
+    bundle can never be served as cached. Files are <=25MB, so full hashing is
+    cheap; ValueError (missing/oversize pick) propagates rather than aliasing
+    a broken selection to a chat-only cache hit."""
     import hashlib
-    # a ValueError (missing/oversize explicit pick) must propagate — hashing an
-    # empty set would alias a broken selection to a valid chat-only cache hit
     pool = _effective_files(session, opts)
     parts = []
-    for a in pool:
+    for a in sorted(pool, key=lambda x: x["path"]):
+        h = hashlib.sha256()
         try:
-            st = os.stat(a["path"])
-            parts.append(f"{a['path']}:{st.st_size}:{st.st_mtime:.3f}")
+            with open(a["path"], "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            parts.append(f"{a['path']}:{h.hexdigest()}")
         except OSError:
             parts.append(f"{a['path']}:missing")
-    return hashlib.sha256("\n".join(sorted(parts)).encode()).hexdigest()[:16]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
 
 
 ANNOT_VERSION = 6  # +n_primary (payload-honest badge)
@@ -574,13 +581,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "/api/health":
             self._json({"app": "share-it", "version": VERSION})
+        elif route == "/api/verify":   # token already checked by _guard
+            self._json({"ok": True})
         elif route == "/":
             with open(os.path.join(STATIC_DIR, "index.html"), "rb") as fh:
                 data = fh.read()
-            # inject the token so same-origin fetches can authenticate
-            data = data.replace(b"</head>",
-                b'<script>window.__SHAREIT_TOKEN=' +
-                json.dumps(TOKEN).encode() + b';</script></head>', 1)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
@@ -692,9 +697,10 @@ class Handler(BaseHTTPRequestHandler):
                 if cached:
                     return self._json({"url": cached["url"], "cached": True,
                                        "provider": cached["provider"], "expires": cached["expires"]})
+                pre = os.path.getsize(file)
                 result = share.upload_file(file, expires_hours=opts["expires_hours"])
-                entry = share.record_share(session, result, opts,
-                                           os.path.getsize(file), artifact=file)
+                entry = share.record_share(session, result, opts, pre, artifact=file,
+                                           src_mtime=os.path.getmtime(file))
                 return self._json({"url": entry["url"], "provider": entry["provider"],
                                    "expires": entry["expires"]})
             except (OSError, ValueError, KeyError) as e:
@@ -1015,11 +1021,11 @@ def _rescue_archive():
             if (os.path.isfile(dest) and os.path.getsize(dest) == ent["size"]
                     and abs(os.path.getmtime(dest) - ent["mtime"]) < 1):
                 continue
+            if used + ent.get("size", 0) > RESCUE_CAP_BYTES:
+                break  # would exceed the aggregate cap — stop before copying
             os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
             shutil.copy2(real, dest)
             used += ent.get("size", 0)
-            if used > RESCUE_CAP_BYTES:
-                break  # aggregate cap reached — stop this pass
         except OSError:
             continue
 

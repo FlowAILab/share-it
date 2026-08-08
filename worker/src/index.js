@@ -58,12 +58,13 @@ async function deleteBundle(env, id) {
   } while (cursor);
 }
 
-function serveObject(obj, name, manifest, head) {
+function serveObject(obj, name, head) {
   const ct = obj.httpMetadata?.contentType || "application/octet-stream";
   const headers = { ...SAFE_HEADERS, "Content-Type": ct };
-  if (ACTIVE.test(ct) && !(manifest?.trusted || []).includes(name)) {
-    // user artifact HTML/SVG: render in an opaque origin, no scripts reach ours
-    headers["Content-Security-Policy"] = "sandbox allow-scripts";
+  if (ACTIVE.test(ct)) {
+    // ALL html/svg (our reader included — it has no scripts) renders in an
+    // opaque sandbox origin, so no bundle can script our domain
+    headers["Content-Security-Policy"] = "sandbox";
   }
   return new Response(head ? null : obj.body, { headers });
 }
@@ -103,8 +104,6 @@ export default {
       }
       if (total > MAX_BUNDLE_BYTES)
         return Response.json({ error: `bundle exceeds ${MAX_BUNDLE_BYTES} bytes` }, { status: 413 });
-      // only the client-rendered index may be trusted (never user artifacts)
-      manifest.trusted = manifest.trusted === true ? [sanitize(manifest.index)] : [];
       manifest.hours = hours;
       manifest.committedAt = Date.now();
       const meta = {};
@@ -143,6 +142,13 @@ export default {
       const [, id, name] = m;
       if (req.method === "DELETE" && !name) {
         if (!authed(req, env)) return new Response("unauthorized", { status: 401 });
+        // possession of the fleet token is not enough — deleting a bundle needs
+        // its per-share delKey (kept only by the creator)
+        const manifest = await getManifest(env, id);
+        if (manifest?.delKey) {
+          const given = req.headers.get("X-Del-Key") || "";
+          if (given !== manifest.delKey) return new Response("forbidden", { status: 403 });
+        }
         await deleteBundle(env, id);
         return new Response("deleted");
       }
@@ -160,7 +166,7 @@ export default {
         if (!listed) return new Response("not found", { status: 404 });
         const obj = await env.LINKS.get(`b/${id}/${want}`);
         if (!obj) return new Response("not found", { status: 404 });
-        return serveObject(obj, want, manifest, req.method === "HEAD");
+        return serveObject(obj, want, req.method === "HEAD");
       }
     }
 
@@ -200,7 +206,7 @@ export default {
           await env.LINKS.delete(key);
           return new Response("expired", { status: 404 });
         }
-        return serveObject(obj, key, null, req.method === "HEAD");
+        return serveObject(obj, key, req.method === "HEAD");
       }
     }
     return new Response("share-it links", { status: 404 });

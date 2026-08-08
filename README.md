@@ -36,14 +36,15 @@ teammate, or hand it to another agent to continue the work.
 ## Core
 
 - 🔗 **Share a link** — hit **⏎**, a short URL is on your clipboard.
-- 📋 **Copy the session** — hit **⌘C**, the full chat as a file. Stays on your machine.
+- 📋 **Copy the chat** — hit **⌘C**, it pastes formatted into Slack or Mail, and as clean
+  markdown into your editor. Stays on your machine.
 - 📦 **Grab the files** — the PDFs, images, and code the agent made, ready to drop into
   Finder, Slack, or email. Real files, not screenshots.
 
 ## Nice extras
 
-- 🧠 **Deep mode** — pack in the reasoning, tool output, and every file, so another agent
-  can truly take over.
+- 🧠 **Deep mode** — the reasoning, full tool output, and the files it created or changed,
+  plus a manifest of everything it read, so another agent can pick up the thread.
 - 🛟 **Nothing gets lost** — Claude wipes old sessions after ~30 days; Share-It quietly
   keeps them, and lets you search everything you've ever done.
 - **Reader mode** — a clean web page for humans, not raw markdown.

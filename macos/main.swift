@@ -60,6 +60,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         return FileManager.default.currentDirectoryPath
     }
 
+    lazy var token: String = {
+        var b = [UInt8](repeating: 0, count: 24)
+        _ = SecRandomCopyBytes(kSecRandomDefault, b.count, &b)
+        return Data(b).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }()
+
     func pythonPath() -> String {
         // prefer the bundled standalone CPython (DMG); fall back to system python3 (dev)
         if let res = Bundle.main.resourcePath {
@@ -70,8 +79,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     func startServer() {
-        let probe = URL(string: "http://127.0.0.1:\(port)/api/shares")!
-        if (try? Data(contentsOf: probe)) != nil { return } // already running (dev)
         let p = Process()
         let py = pythonPath()
         if py == "/usr/bin/env" {
@@ -81,17 +88,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             p.executableURL = URL(fileURLWithPath: py)
             p.arguments = [backendDir() + "/app.py", "--no-browser"]
         }
+        var env = ProcessInfo.processInfo.environment
+        env["SHAREIT_TOKEN"] = token   // the backend requires exactly this token
+        p.environment = env
         try? p.run()
         server = p
     }
 
     func waitForServer(attempts: Int) {
-        let health = URL(string: "http://127.0.0.1:\(port)/api/health")!
+        var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/verify")!)
+        req.timeoutInterval = 0.5
+        req.setValue(token, forHTTPHeaderField: "X-Shareit-Token")  // proves it's OUR backend
         func poll(_ left: Int) {
-            var req = URLRequest(url: health); req.timeoutInterval = 0.5
-            URLSession.shared.dataTask(with: req) { data, resp, _ in
+            URLSession.shared.dataTask(with: req) { _, resp, _ in
                 let ok = (resp as? HTTPURLResponse)?.statusCode == 200
-                    && data.map { String(decoding: $0, as: UTF8.self).contains("share-it") } == true
                 DispatchQueue.main.async {
                     if ok {
                         self.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(self.port)/")!))
@@ -151,6 +161,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
         let cfg = WKWebViewConfiguration()
         cfg.userContentController.add(self, name: "shareit")
+        // deliver the API token out-of-band (JS injection), so it never travels
+        // over HTTP where any local process could read it from the page source
+        let inject = WKUserScript(source: "window.__SHAREIT_TOKEN=\"\(token)\";",
+                                  injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        cfg.userContentController.addUserScript(inject)
         webView = WKWebView(frame: effect.bounds, configuration: cfg)
         webView.setValue(false, forKey: "drawsBackground")
         webView.autoresizingMask = [.width, .height]
@@ -184,6 +199,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     // MARK: JS bridge
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        // defense in depth: ignore bridge calls from any page that isn't ours
+        let host = message.frameInfo.request.url?.host
+        guard host == "127.0.0.1" || host == "localhost" else { return }
         if message.body as? String == "hide" { panel.orderOut(nil); return }
         guard let dict = message.body as? [String: Any],
               let cmd = dict["cmd"] as? String else { return }

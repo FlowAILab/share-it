@@ -11,22 +11,34 @@ Share-It is local-first: session data never leaves your machine until you press 
 
 ## Local server
 
-The backend binds to `127.0.0.1:8749`. `/api/*` requires a per-launch token written
-to `~/.shareit/session_token` (mode `0600`) and injected into the app's own page — this
-stops a *different* logged-in user on the same Mac from driving the API. A process running
-as **you** can read that file, but such a process already has your filesystem access, so
-this is not a new exposure.
+The backend binds to `127.0.0.1:8749`. `/api/*` requires a per-launch token. The macOS
+shell **generates** the token, passes it to the Python backend it spawns via the
+`SHAREIT_TOKEN` environment variable, and injects it into its own WKWebView out-of-band
+(never over HTTP, so it can't be read from the page source). The shell then calls
+`/api/verify` with that token and only loads the UI / enables the native bridge if the
+server proves it holds the same token — so a process that squats port 8749 before launch
+cannot impersonate the backend. The bridge also ignores messages from any frame that isn't
+loopback. A token file (`~/.shareit/session_token`, mode `0600`) is written for dev/CLI use.
 
-## Known limitations (by design, pre-1.0)
+## Rendered content
 
-- **Shared hosted token.** The DMG bundles one upload token for the hosted worker, so
-  anyone who extracts it can upload content or delete a share URL they know. Abuse is
-  bounded by a 25 MB/object, 100 MB/bundle, 64-object cap and expiry. Per-install
-  capability credentials are the planned fix. Self-hosters should set their own worker
-  `SHARE_TOKEN` and `default_config.json`.
-- **Native bridge trusts the loopback page.** The macOS shell loads whatever answers on
-  8749; a process that squats the port before launch could serve the UI. Mitigated by the
-  per-launch token (a squatter can't mint valid `/api` calls) but not fully closed until
-  the shell spawns and pins its own backend.
+User-supplied HTML/SVG artifacts — and the reader page itself — are served with
+`Content-Security-Policy: sandbox`, rendering them in an opaque origin so no shared bundle
+can execute script against the worker domain. `X-Content-Type-Options: nosniff` is always
+set. Transcript text is treated as untrusted data, HTML-escaped at render time.
+
+## Bundle deletion
+
+Deleting a hosted share requires a per-share `delKey` returned only to the creator at
+upload time — possession of the fleet upload token is **not** sufficient to delete someone
+else's link.
+
+## Known limitations (pre-1.0)
+
+- **Shared hosted upload token.** The DMG bundles one upload token for the hosted worker.
+  Anyone who extracts it can upload content (bounded by 25 MB/object, 100 MB/bundle,
+  64-object, and expiry caps) — but not delete others' shares (see above) and not script
+  the worker origin (sandboxed). Per-install capability credentials are the planned fix;
+  self-hosters set their own worker `SHARE_TOKEN` + `default_config.json`.
 - **Attached files ship as-is.** Secret scrubbing covers transcript *text*, not the bytes
-  of files you attach — review the selected files before sharing.
+  of files you attach — review the selected files (shown as named chips) before sharing.

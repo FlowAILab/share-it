@@ -162,7 +162,8 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
             failed = [f for f in pool.map(put, objects) if f]
         if failed:
             _abort(f"upload failed for: {', '.join(failed)}")
-        manifest = {"index": index_name, "hours": expires_hours, "trusted": True,
+        del_key = secrets.token_urlsafe(16)
+        manifest = {"index": index_name, "hours": expires_hours, "delKey": del_key,
                     "objects": [{"name": o["name"], "size": len(o["data"])} for o in objects]}
         status, body = _bundle_call(f"/bundle/{bundle_id}/commit",
                                     data=json.dumps(manifest).encode(),
@@ -171,7 +172,7 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
             _abort(f"share commit failed ({status})")
         out = json.loads(body)
         return {"url": out["url"], "provider": "hosted", "ref": f"b/{bundle_id}",
-                "hours": out["hours"]}
+                "hours": out["hours"], "del_key": del_key}
     except Exception as e:
         if getattr(e, "_shareit_final", False):
             raise  # already rolled back
@@ -208,8 +209,11 @@ def delete(entry):
         hosted = _hosted_config()
         if not hosted:
             raise OSError("hosted uploader not configured")
+        hdrs = {"X-Share-Token": hosted["token"]}
+        if entry.get("del_key"):
+            hdrs["X-Del-Key"] = entry["del_key"]
         status, _ = _http(hosted["url"].rstrip("/") + "/" + entry["ref"], method="DELETE",
-                          headers={"X-Share-Token": hosted["token"]})
+                          headers=hdrs)
         if status != 200:
             raise OSError(f"hosted delete {status}")
         return
@@ -222,7 +226,7 @@ def load_shares():
     try:
         with open(SHARES_PATH) as fh:
             data = json.load(fh)
-        return data if isinstance(data, list) else []
+        return [s for s in data if isinstance(s, dict) and "url" in s] if isinstance(data, list) else []
     except FileNotFoundError:
         return []
     except (json.JSONDecodeError, OSError):
@@ -278,6 +282,7 @@ def record_share(session, result, opts, size, artifact=None, file_paths=None,
         "export_v": EXPORT_SCHEMA_VERSION,
         "messages_only": bool(opts.get("messages_only")),
         "thinking": bool(opts.get("thinking")), "size": size, "deleted": False,
+        "del_key": result.get("del_key"),
         "snapshot": _snapshot(file_paths if file_paths is not None
                               else ([artifact] if artifact else [])),
         **(counts or {}),

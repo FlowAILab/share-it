@@ -484,7 +484,7 @@ def session_reads(path, source=None, cwd=None, limit=40):
             size = os.stat(rfp).st_size
         except OSError:
             size = None
-        out.append({"path": fp, "name": os.path.basename(fp), "size": size})
+        out.append({"path": rfp, "name": os.path.basename(rfp), "size": size})
         if len(out) >= limit:
             break
     return out

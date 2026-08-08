@@ -95,25 +95,26 @@ def main():
         os.remove(ART_PATH)
 
     # codex: same file via absolute + relative spellings must dedupe, created wins
-    with open("/tmp/shareit-dup.pdf", "w") as fh:
+    dup_pdf = os.path.join(tmp, "dup.pdf")
+    with open(dup_pdf, "w") as fh:
         fh.write("x")
     dup = fixture(tmp, "codex-dup.jsonl", [
-        {"type": "session_meta", "payload": {"id": "d", "cwd": "/tmp", "source": "cli"}},
+        {"type": "session_meta", "payload": {"id": "d", "cwd": tmp, "source": "cli"}},
         {"type": "event_msg", "payload": {"type": "patch_apply_end", "success": True,
-            "changes": {"shareit-dup.pdf": {"update": {}}}}},
+            "changes": {"dup.pdf": {"update": {}}}}},
         {"type": "response_item", "payload": {"type": "function_call", "name": "shell",
-            "arguments": "pandoc x.md --output /tmp/shareit-dup.pdf", "call_id": "c9"}},
+            "arguments": f"pandoc x.md --output {dup_pdf}", "call_id": "c9"}},
         {"type": "response_item", "payload": {"type": "function_call_output",
             "call_id": "c9", "output": "done"}},
     ])
     try:
-        arts = parsers.session_artifacts(dup, source="codex", cwd="/tmp")
+        arts = parsers.session_artifacts(dup, source="codex", cwd=tmp)
         names = [(a["name"], a["kind"]) for a in arts]
         check("codex dedupe across spellings", len(arts) == 1, str(names))
         check("created beats modified on merge",
               arts and arts[0]["kind"] == "created", str(names))
     finally:
-        os.remove("/tmp/shareit-dup.pdf")
+        os.remove(dup_pdf)
 
     print("== render ==")
     sess = {"source": "claude", "title": "t", "project": "p", "mtime": time.time()}
