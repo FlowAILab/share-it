@@ -71,13 +71,17 @@ _EXT = {"image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
         "image/gif": "gif", "image/webp": "webp"}
 
 
-def collect(messages, cap=24):
+def collect(messages, cap=None):
     """Decode + clean every inline image across messages, deduped by content.
 
     Returns [{name, data, content_type}]; annotates each message's media
     entries with their assigned object name (msg media entry gains "name").
     """
+    if cap is None:
+        import parsers as _p
+        cap = _p.MEDIA_MAX_PER_SESSION
     out, by_hash = [], {}
+    clean_b64 = {}  # name → metadata-stripped base64 (what downstream may embed)
     for msg in messages:
         for m in msg.get("media") or []:
             try:
@@ -90,13 +94,16 @@ def collect(messages, cap=24):
             h = hashlib.sha256(raw).hexdigest()
             if h in by_hash:
                 m["name"] = by_hash[h]
+                m["data"] = clean_b64[by_hash[h]]   # never leak pre-strip bytes
                 continue
             if len(out) >= cap:
                 continue
             ext = _EXT.get(m.get("media_type"), "png")
             name = f"m{len(out) + 1}.{ext}"
             by_hash[h] = name
+            clean_b64[name] = base64.b64encode(raw).decode()
             m["name"] = name
+            m["data"] = clean_b64[name]             # downstream embeds cleaned bytes only
             out.append({"name": name, "data": raw,
                         "content_type": m.get("media_type") or "image/png"})
     return out

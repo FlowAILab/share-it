@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 
 USER_AGENT = "share-it/0.1 (local session viewer)"
-EXPORT_SCHEMA_VERSION = 5  # v5: bundle shares (media + files under one id)
+EXPORT_SCHEMA_VERSION = 6  # v6: absolute media urls, declared artifacts, honest counts
 EXPIRES_HOURS = 0  # default: no expiry (public object)
 STATE_DIR = os.path.expanduser("~/.shareit")
 SHARES_PATH = os.path.join(STATE_DIR, "shares.json")

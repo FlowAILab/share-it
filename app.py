@@ -258,10 +258,9 @@ def _artifact_fingerprint(session, opts):
     """Hash of the (path, size, mtime) set a share would include — any deletion,
     addition or edit changes it, so a stale bundle can never be served as cached."""
     import hashlib
-    try:
-        pool = _effective_files(session, opts)
-    except ValueError:
-        pool = []  # the share itself will surface the error
+    # a ValueError (missing/oversize explicit pick) must propagate — hashing an
+    # empty set would alias a broken selection to a valid chat-only cache hit
+    pool = _effective_files(session, opts)
     parts = []
     for a in pool:
         try:

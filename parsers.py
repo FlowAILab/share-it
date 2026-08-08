@@ -331,13 +331,18 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
     a stray write elsewhere on disk is not a shareable "artifact".
     """
     found = {}     # path → kind ("created" beats "modified")
+    trusted = set()  # paths from tool-verified writes (Write/apply_patch) — the
+                     # only ones allowed outside the session root
     declared = {}  # realpath → True: files the session formally published
     real = os.path.realpath(path)
     is_claude = (source == "claude" if source
                  else real.startswith(os.path.realpath(CLAUDE_ROOT) + os.sep))
     root = os.path.realpath(cwd) + os.sep if cwd else None
     if not is_claude:
-        found.update(_codex_structured_writes(real))
+        sw = _codex_structured_writes(real)
+        found.update(sw)
+        trusted.update(os.path.realpath(p if os.path.isabs(p) else os.path.join(cwd or "/", p))
+                       for p, k in sw.items() if k == "created")
     for m in (parse_claude if is_claude else parse_codex)(real) if source else parse_session(path):
         if m["role"] != "tool":
             continue
@@ -357,7 +362,11 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
                 continue
             key, kind = _WRITE_TOOLS[m["name"]]
             try:
-                candidates = [(json.loads(m["input"]).get(key), kind)]
+                fp = json.loads(m["input"]).get(key)
+                candidates = [(fp, kind)]
+                if fp and kind == "created":
+                    trusted.add(os.path.realpath(fp if os.path.isabs(fp)
+                                                 else os.path.join(cwd or "/", fp)))
             except (json.JSONDecodeError, AttributeError):
                 candidates = []
         elif not is_claude:
@@ -417,11 +426,12 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
         # CREATED files count wherever they live (the agent verifiably made
         # them) as long as they're the user's own; modified stay root-contained
         contained = rc.startswith(root)
-        if not contained and not (kind == "created" and rc.startswith(home)
+        if not contained and not (kind == "created" and rc in trusted
+                                  and rc.startswith(home)
                                   and "/Library/" not in rc and ".app/" not in rc
                                   and "/Applications/" not in rc
                                   and "/." not in rc[len(home) - 1:]):
-            continue
+            continue  # shell-output heuristic paths never leave the project root
         if rc in seen_rc:
             continue
         if kind == "created" or rc not in resolved:
