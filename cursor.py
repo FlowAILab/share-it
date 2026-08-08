@@ -32,7 +32,13 @@ def _rows(path, table):
             "SELECT name FROM sqlite_master WHERE type='table'")}
         if table not in names:
             return
+        seen = 0
         for k, v in con.execute(f"SELECT key, value FROM {table}"):
+            seen += 1
+            if seen > 50000:          # bound: a pathological DB can't stall us
+                break
+            if v is not None and len(v) > 5_000_000:  # skip absurd single blobs
+                continue
             try:
                 yield k, json.loads(v.decode("utf-8") if isinstance(v, bytes) else v)
             except (json.JSONDecodeError, UnicodeDecodeError):

@@ -1,10 +1,19 @@
+# secrets — NEVER commit
+default_config.json
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+**/.wrangler/
+**/node_modules/
+
+# build artifacts
 __pycache__/
 *.pyc
 macos/share-it-bin
 macos/build/
 dist/
 *.dmg
-worker/.wrangler/
-worker/node_modules/
+*.sha256
+
 .DS_Store
-default_config.json

@@ -130,7 +130,9 @@ class CursorAdapter(Adapter):
         return [_cursor.CURSOR_ROOT]
 
     def owns(self, real_path):
-        return real_path.startswith(_cursor.CURSOR_ROOT) and "#" in real_path
+        base = real_path.split("#", 1)[0]
+        return "#" in real_path and (base == _cursor.CURSOR_ROOT
+                                     or base.startswith(_cursor.CURSOR_ROOT + os.sep))
 
     def discover(self):
         out = []

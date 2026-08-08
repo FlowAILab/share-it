@@ -1,0 +1,5 @@
+# Anything that reaches a released binary requires owner review.
+* @dhawal1
+/macos/ @dhawal1
+/worker/ @dhawal1
+/.github/ @dhawal1

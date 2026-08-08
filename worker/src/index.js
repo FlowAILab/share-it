@@ -11,7 +11,7 @@ const MAX_BYTES = 25 * 1024 * 1024;
 const ALLOWED_HOURS = new Set([0, 24, 72, 168]);
 
 const token = () => {
-  const a = new Uint8Array(6);  // 48-bit unguessable, ~8 chars
+  const a = new Uint8Array(16);  // 128-bit unguessable
   crypto.getRandomValues(a);
   return btoa(String.fromCharCode(...a)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 };
@@ -26,8 +26,10 @@ export default {
     if (req.method === "POST" && url.pathname === "/up") {
       if (req.headers.get("X-Share-Token") !== env.SHARE_TOKEN)
         return new Response("unauthorized", { status: 401 });
-      const len = Number(req.headers.get("Content-Length") || 0);
-      if (!len || len > MAX_BYTES)
+      const claimed = Number(req.headers.get("Content-Length") || 0);
+      if (claimed > MAX_BYTES) return new Response("too large", { status: 413 });
+      const body = await req.arrayBuffer();           // buffer to check ACTUAL size
+      if (!body.byteLength || body.byteLength > MAX_BYTES)
         return new Response("bad size", { status: 413 });
       let hours = Number(req.headers.get("X-Expiry-Hours") || 0);
       if (!ALLOWED_HOURS.has(hours)) hours = 168;
@@ -36,7 +38,7 @@ export default {
       const meta = {};
       if (hours > 0)
         meta.expiresAt = String(Date.now() + hours * 3600 * 1000);
-      await env.LINKS.put(key, req.body, {
+      await env.LINKS.put(key, body, {
         httpMetadata: { contentType: req.headers.get("Content-Type") || "text/markdown" },
         customMetadata: meta,
       });

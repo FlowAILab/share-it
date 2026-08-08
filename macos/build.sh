@@ -17,7 +17,10 @@ echo "assembling ${DEST}…"
 rm -rf "$DEST"
 mkdir -p "$DEST/Contents/MacOS" "$DEST/Contents/Resources/backend/static" "$DEST/Contents/Resources/backend/tests"
 mv share-it-bin "$DEST/Contents/MacOS/share-it"
-cp ../*.py "$DEST/Contents/Resources/backend/"   # every backend module — never hand-list
+# copy only git-TRACKED python — never an untracked/shadow module from a dirty tree
+for f in $(git -C .. ls-files '*.py' 2>/dev/null | grep -v '^tests/' || echo ../*.py); do
+  cp "../$f" "$DEST/Contents/Resources/backend/$(basename "$f")" 2>/dev/null || cp "$f" "$DEST/Contents/Resources/backend/"
+done
 cp ../static/index.html "$DEST/Contents/Resources/backend/static/"
 
 if [ -n "$BUNDLE_PY" ]; then
@@ -39,6 +42,9 @@ cat > "$DEST/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSDesktopFolderUsageDescription</key><string>Share-It copies or shares files your AI session created on your Desktop.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Share-It copies or shares files your AI session created in Documents.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Share-It copies or shares files your AI session created in Downloads.</string>
 </dict></plist>
 PLIST
 codesign --force --deep --sign - "$DEST" 2>/dev/null || true
