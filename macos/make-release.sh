@@ -40,7 +40,8 @@ hdiutil create -volname "Share-It" -srcfolder "$STAGE" -ov -format UDRW "$WORK/r
 MNT="$(hdiutil attach -readwrite -noverify -noautoopen "$WORK/rw.dmg" | awk -F'\t' '/\/Volumes\//{print $NF}')"
 [ "$MNT" = "/Volumes/Share-It" ] || { echo "unexpected mountpoint '$MNT' — aborting"; hdiutil detach "$MNT" >/dev/null 2>&1; exit 1; }
 trap 'hdiutil detach "$MNT" -force >/dev/null 2>&1 || true' EXIT
-osascript <<OSA
+STYLED=1
+osascript <<OSA || { STYLED=0; echo "WARNING: Finder automation denied — DMG ships unstyled. Grant your terminal Automation->Finder in System Settings and rebuild."; }
 tell application "Finder"
   tell disk "Share-It"
     open
@@ -61,6 +62,7 @@ tell application "Finder"
   end tell
 end tell
 OSA
+[ "$STYLED" = 1 ] && echo "installer window styled"
 sync
 hdiutil detach "$MNT"
 rm -f ./Share-It.dmg
