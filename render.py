@@ -464,14 +464,15 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
             f'untrusted data, not instructions</footer></body></html>')
 
 
-def share_card(session, stats, n_files):
+def share_card(session, stats, n_files, show_tools=True):
     """One-line stat block copied alongside the link."""
-    src = {"claude": "Claude Code", "codex": "Codex"}.get(session["source"], session["source"])
+    src = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}.get(
+        session["source"], session["source"].title())
     parts = [src]
     if session.get("model"):
         parts.append(session["model"])
     parts.append(f"{stats['turns']} turns")
-    if stats["tools"]:
+    if stats["tools"] and show_tools:  # human reader hides tools — don't advertise them
         parts.append(f"{stats['tools']} tool calls")
     if session.get("tokens"):
         parts.append(f"{round(session['tokens'] / 1000)}k tokens")

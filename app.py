@@ -433,7 +433,7 @@ def _assemble_bundle(path, opts):
         shared_paths.append(a["path"])
 
     stats = parsers.session_stats(path, messages)
-    card = render.share_card(session, stats, len(shared_paths))
+    card = render.share_card(session, stats, len(shared_paths), show_tools=opts["mode"] != "human")
     if opts["redact"]:
         card = render.redact(card)
     reads = []
@@ -451,7 +451,7 @@ def _render_index(session, messages, opts, artifact_links, stats, reads, media_b
                     else f"expires in {opts['expires_hours'] // 24}d")
     links = [{**a, "url": (f"{media_base}/{a['url']}" if media_base and a.get("url") else None)}
              for a in artifact_links]
-    card = render.share_card(session, stats, sum(1 for a in links if a["url"]))
+    card = render.share_card(session, stats, sum(1 for a in links if a["url"]), show_tools=opts["mode"] != "human")
     if opts["redact"]:
         card = render.redact(card)
     if opts.get("fmt") == "html":
