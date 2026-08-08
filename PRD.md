@@ -28,7 +28,6 @@ indexing, no expiry, no revoke. Codex has no sharing at all.
 - Share: session→markdown (full/messages-only, thinking opt-in, redaction) or artifact→raw
   file. Providers: S3 short public link (default, `p/<token>`, expiry via tag-based
   lifecycle: ∞/1d/3d/7d) → S3 presigned (≤7d, pre-public-setup fallback) → dpaste (≤1MB)
-  → uguu. Pure-Python SigV4; no aws CLI at runtime; scoped IAM key (see setup-aws.sh).
 - Shares drawer: provider, time left, copy, delete-now (S3).
 - Native shell: Swift NSPanel + WKWebView, ⌥S Carbon hotkey, health-checked backend
   launch with Retry/Quit alert. `macos/build.sh` → ~/Applications/share-it.app.
