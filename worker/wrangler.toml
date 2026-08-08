@@ -1,0 +1,10 @@
+name = "s"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+[[r2_buckets]]
+binding = "LINKS"
+bucket_name = "share-it-links"
+
+[triggers]
+crons = ["0 3 * * *"]   # daily purge of expired objects

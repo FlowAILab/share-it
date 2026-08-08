@@ -1,0 +1,1123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'">
+<title>share-it</title>
+<style>
+/* Monochrome glass palette. Native app supplies vibrancy blur behind a
+   transparent body; the browser fallback paints its own dark glass. */
+:root {
+  --ink: rgba(255,255,255,0.92); --dim: rgba(255,255,255,0.55);
+  --faint: rgba(255,255,255,0.32); --hair: rgba(255,255,255,0.1);
+  --fill: rgba(255,255,255,0.07); --fill-hi: rgba(255,255,255,0.14);
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; background: transparent; }
+body {
+  color: var(--ink);
+  font: 14px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+body.browser {
+  background: radial-gradient(1200px 700px at 50% -10%, #23262c, #101216);
+}
+body.browser #panel {
+  background: rgba(24,26,31,0.72);
+  backdrop-filter: blur(28px) saturate(1.2); -webkit-backdrop-filter: blur(28px) saturate(1.2);
+  border: 1px solid var(--hair); border-radius: 16px;
+  width: min(680px, 94vw); height: min(540px, 88vh); margin: auto;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+}
+#panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
+
+#top { display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; }
+#q {
+  flex: 1; background: none; border: none; outline: none; color: var(--ink);
+  font: 300 19px -apple-system, system-ui, sans-serif; caret-color: var(--ink);
+}
+#q::placeholder { color: var(--faint); }
+#q:focus-visible { box-shadow: 0 1px 0 var(--dim); }
+.seg span:focus-visible, .tog:focus-visible, .iconbtn:focus-visible, .rowshare:focus-visible {
+  outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+.tog, .seg span { min-height: 24px; display: inline-flex; align-items: center; }
+.tog .lbl { margin-left: 5px; font-size: 11px; }
+.iconbtn {
+  background: none; border: none; color: var(--dim); cursor: pointer; font: 13px monospace;
+  padding: 4px 8px; border-radius: 7px;
+}
+.iconbtn:hover, .iconbtn.on { color: var(--ink); background: var(--fill); }
+#hr { height: 1px; background: var(--hair); margin: 0 14px; }
+#opts { padding: 0 18px 10px; }
+.rowshare {
+  border: none; cursor: pointer; border-radius: 99px; font: 600 11.5px -apple-system, system-ui;
+  padding: 4px 0; width: 86px; flex: none; text-align: center; color: #101216; visibility: hidden;
+  background: linear-gradient(110deg, rgba(255,255,255,0.95), rgba(255,255,255,0.7), rgba(255,255,255,0.95));
+  background-size: 220% 100%; animation: sheen 5s ease infinite;
+}
+.row.sel .rowshare, .row:hover .rowshare, .rowshare:focus-visible { opacity: 1; visibility: visible; }
+.rowshare:disabled { opacity: 0.6; }
+.rowshare.done { background: none; color: var(--ink); border: 1px solid var(--hair); animation: none; }
+
+#list { flex: 1; overflow-y: auto; padding: 8px 10px; }
+#list::-webkit-scrollbar { width: 0; }
+.row { border-radius: 10px; cursor: default; }
+.row-line { display: flex; align-items: center; gap: 10px; padding: 9px 10px; min-width: 0; }
+.row.sel > .row-line { background: var(--fill-hi); border-radius: 10px; }
+.glyph { width: 14px; height: 14px; flex: none; color: var(--dim); }
+.row[data-app="claude-code"] .glyph, #foot .c-claude { color: #d9825f; }
+.row[data-app="cowork"] .glyph, #foot .c-cowork { color: #c9a2e8; }
+.row[data-app="codex"] .glyph, #foot .c-codex { color: #8fb8e8; }
+.glyph svg { width: 100%; height: 100%; display: block; }
+.row .t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .m { flex: none; font-size: 11px; color: var(--dim); }
+.row .clip { flex: none; display: inline-flex; align-items: center; gap: 2px;
+             font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.row .clip svg { width: 11px; height: 11px; }
+.row.sel .clip, .row:hover .clip { color: var(--dim); }
+.empty { color: var(--dim); text-align: center; margin-top: 80px; font-weight: 300; font-size: 14px; }
+.empty .esc-hint { margin-top: 10px; font-size: 12px; color: var(--faint); }
+
+/* expansion */
+.card { margin: 2px 6px 8px 34px; padding: 10px 12px; border-left: 1px solid var(--hair);
+        display: flex; flex-direction: column; gap: 10px; }
+.peek { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; }
+.peek div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            color: rgba(255,255,255,0.68); display: flex; gap: 8px; }
+.peek div > span { overflow: hidden; text-overflow: ellipsis; }
+.peek i { font-style: normal; flex: none; width: 24px; font-size: 10.5px; letter-spacing: 0.06em;
+          text-transform: uppercase; color: var(--dim); padding-top: 2px; }
+.peek b { color: var(--ink); font-weight: 600; }
+.ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seg { display: inline-flex; background: var(--fill); border-radius: 8px; padding: 2px; }
+.seg span { padding: 3px 10px; border-radius: 6px; font-size: 11.5px; color: var(--dim); cursor: pointer; }
+.seg span.on { background: var(--fill-hi); color: var(--ink); }
+.tog { font-size: 11.5px; color: var(--dim); cursor: pointer; padding: 3px 8px; border-radius: 6px; }
+.tog.on { color: var(--ink); background: var(--fill); }
+.tog.icon { padding: 4px 7px; display: inline-flex; align-items: center; }
+.tog.icon svg { width: 13px; height: 13px; display: block; }
+.grow { flex: 1; }
+.share {
+  border: none; cursor: pointer; color: #101216; font: 600 13px -apple-system, system-ui;
+  padding: 8px 22px; border-radius: 99px;
+  background: linear-gradient(110deg, rgba(255,255,255,0.95), rgba(255,255,255,0.75), rgba(255,255,255,0.95));
+  background-size: 220% 100%; animation: sheen 5s ease infinite;
+}
+.share:hover { filter: brightness(1.06); }
+.share:disabled { opacity: 0.5; animation: none; }
+@keyframes sheen { 0%,100% { background-position: 0% 0; } 50% { background-position: 100% 0; } }
+@media (prefers-reduced-motion: reduce) { .share, .rowshare { animation: none; } }
+.linkrow { display: flex; gap: 8px; align-items: center; }
+.linkrow input {
+  flex: 1; background: var(--fill); border: 1px solid var(--hair); border-radius: 8px;
+  color: var(--ink); font: 12px ui-monospace, Menlo, monospace; padding: 7px 10px; outline: none;
+}
+.warn-note { font-size: 11px; color: var(--dim); }
+.cardline { font-size: 11.5px; color: var(--dim); }
+#hits-head { padding: 8px 12px 2px; font-size: 10.5px; letter-spacing: 0.08em;
+             text-transform: uppercase; color: var(--faint); }
+.row .snip { display: block; font-size: 11.5px; color: var(--dim);
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .snip b { color: var(--ink); font-weight: 600; }
+.arts { gap: 5px 6px; }
+.art {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  font-size: 11.5px; padding: 3px 9px; border-radius: 7px;
+  border: 1px solid var(--hair); color: var(--dim);
+}
+.art .fico { display: inline-flex; opacity: 0.75; margin-right: 1px; }
+.art .fico svg { display: block; }
+kbd.ghostkey { color: var(--dim); margin-left: 4px; }
+.art b { font-weight: 600; color: var(--ink); }
+.art { height: 26px; }
+.art.a-new { background: var(--fill); color: var(--ink); border-color: var(--faint); }
+.art.a-mod { background: var(--fill); }
+.art.a-ref { border-style: dashed; }
+.linkrow .share-meta { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.art:hover { border-color: var(--dim); }
+.art.picked { border-color: var(--ink); color: var(--ink); background: var(--fill-hi); }
+.share.small { padding: 4px 14px; font-size: 11.5px; }
+.share.ghost { background: none; border: 1px solid var(--faint); color: var(--ink); animation: none; }
+.share.ghost:hover { border-color: var(--ink); filter: none; }
+.resume { font-size: 11px; color: var(--faint); }
+.resume:hover { color: var(--ink); }
+
+#foot {
+  display: flex; gap: 14px; padding: 9px 18px; border-top: 1px solid var(--hair);
+  font-size: 11px; color: var(--faint);
+}
+#foot .grow { flex: 1; }
+#foot .brand { font-weight: 700; letter-spacing: -0.01em; color: var(--ink); opacity: 0.9; }
+#foot .fdiv { position: relative; padding-left: 12px; margin-left: 8px; }
+#foot .fdiv::before { content: ""; position: absolute; left: 0; top: 2px; bottom: 2px; width: 1px; background: var(--hair); }
+kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--dim); }
+
+/* shares view rows reuse .row */
+.row .t a { color: inherit; text-decoration: none; }
+.row .t a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.share-meta { font-size: 11px; color: var(--dim); }
+.dead { text-decoration: line-through; opacity: 0.5; }
+#menu, .menu-pop {
+  position: fixed; z-index: 30; min-width: 220px; padding: 5px;
+  background: rgba(28,31,36,0.86); backdrop-filter: blur(30px) saturate(1.3);
+  -webkit-backdrop-filter: blur(30px) saturate(1.3);
+  border: 1px solid var(--hair); border-radius: 15px; box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+}
+#menu .mi, .menu-pop .mi { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 11px;
+  border-radius: 9px; font-size: 12.5px; color: var(--ink); cursor: pointer; }
+#menu .mi kbd, .menu-pop .mi kbd { margin-left: auto; color: var(--dim); font-size: 11px; }
+#menu .mi .chev { margin-left: auto; color: var(--dim); }
+#menu .mi.sel, .menu-pop .mi.sel { background: var(--fill-hi); }
+#menu hr, .menu-pop hr { border: none; border-top: 1px solid var(--hair); margin: 4px 6px; }
+.dots { flex: none; visibility: hidden; }
+.row.sel .dots, .row:hover .dots { visibility: visible; }
+#toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(8px);
+  background: var(--fill-hi); color: var(--ink); border: 1px solid var(--hair);
+  padding: 7px 16px; border-radius: 99px; font-size: 12px; opacity: 0;
+  transition: opacity 0.15s, transform 0.15s; pointer-events: none; z-index: 20;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+#toast.show { opacity: 1; transform: translateX(-50%); }
+</style>
+</head>
+<body>
+<div id="panel">
+  <div id="top">
+    <input id="q" placeholder="Search sessions…" autocomplete="off" spellcheck="false">
+    <button class="iconbtn" id="btn-shares" title="shared links">↗</button>
+  </div>
+  <div id="opts" class="ctl"></div>
+  <div id="hr"></div>
+  <div id="list"></div>
+  <div id="foot"></div>
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+if (!window.webkit?.messageHandlers?.shareit) document.body.classList.add("browser");
+const nativePost = (m) => window.webkit?.messageHandlers?.shareit?.postMessage(m);
+const nativeCmd = (cmd, files) => {
+  if (!window.webkit?.messageHandlers?.shareit) return false;
+  nativePost({cmd, files});
+  return true;
+};
+// never alert(): modal dialogs freeze the panel (and automation). inline toast instead
+function toast(msg) {
+  let el = $("#toast");
+  if (!el) {
+    el = document.createElement("div"); el.id = "toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg; el.classList.add("show");
+  el.setAttribute("role", "status"); el.removeAttribute("aria-hidden");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => {
+    el.classList.remove("show");
+    el.setAttribute("aria-hidden", "true"); el.removeAttribute("role");
+    setTimeout(() => { if (!el.classList.contains("show")) el.textContent = ""; }, 300);
+  }, 3000);
+}
+function smartCopy() {
+  // 1) real text selection anywhere → let the engine copy it
+  const q = $("#q");
+  if (document.activeElement === q && q.selectionStart !== q.selectionEnd) {
+    document.execCommand("copy");
+    return true;
+  }
+  if (window.getSelection()?.toString()) {
+    document.execCommand("copy");
+    return true;
+  }
+  if (mode !== "list") return false;
+  const vis = visible();
+  const s = vis.find((x) => x.path === expanded) || vis[sel];
+  if (!s) return false;
+  if (expanded === s.path && s._sel?.size) {  // chips selected → real files
+    const files = [...s._sel];
+    if (nativeCmd("copyFiles", files))
+      toast(`${files.length} file${files.length > 1 ? "s" : ""} copied — paste in Finder or any app`);
+    else api("/api/file/copy", {path: s.path, files})
+      .then((d) => toast(`${d.count} file${d.count > 1 ? "s" : ""} copied — paste in Finder or any app`))
+      .catch((err) => toast(err.message));
+    return true;
+  }
+  {  // session selected → copy session export (current mode) + its files
+    const fp = [...(s.art_list || []), ...(s.read_list || [])].map((f) => f.path);
+    copySession(s, null, fp);
+  }
+  return true;
+}
+window.__menuCopy = smartCopy;
+
+/* ---------- unified action menu (⌘K · right-click · •••) ---------- */
+let menu = null;  // {items, sel, s}
+function closeMenu() { menu = null; $("#menu")?.remove(); $("#submenu")?.remove(); }
+
+function menuItemsFor(s) {
+  if (mode === "shares") {
+    const sh = visibleShares()[sel];
+    if (!sh) return [];
+    const items = [
+      {t: "Copy Link", k: "⌘C", run: () => { copyText(sh.url); toast("link copied"); }},
+      {t: "Copy for Agent", run: () => { copyText(
+        "Continue this task from the shared session below. Preserve prior decisions, "
+        + "inspect the included files and begin with the last unresolved request:\n\n" + sh.url);
+        toast("agent handoff copied"); }},
+      {t: "Open", run: () => api("/api/open_url", {url: sh.url}).catch((e) => toast(e.message))},
+    ];
+    if (sh.provider === "hosted")
+      items.push({sep: 1}, {t: "Delete Share", run: () =>
+        document.querySelector(`[data-del="${CSS.escape(sh.url)}"]`)?.click()});
+    return items;
+  }
+  const p = peekCache[s.path];
+  const files = p ? [...(p.artifacts || []), ...(p.reads || [])]
+                  : [...(s.art_list || []), ...(s.read_list || [])];
+  const fp = files.map((f) => f.path);
+  const nf = files.length;
+  const items = [
+    {t: "Share for Agent", k: "⏎", run: () => doShare(s, "agent")},
+    {t: "Share for Human", run: () => doShare(s, "human")},
+    {t: "Share Deep", run: () => {
+      if (!localStorage.getItem("shareit-deep-warned")) {
+        localStorage.setItem("shareit-deep-warned", "1");
+        toast("Deep shares reasoning, detailed tool output and more files — review before sending.");
+      }
+      doShare(s, "deep");
+    }},
+    {sep: 1},
+    {t: `Copy Session (.${opts.mode === "human" ? "html" : "md"})`, k: nf ? "" : "⌘C", run: () => copySession(s, null, [])},
+  ];
+  if (nf) items.push(
+    {t: `Copy Session + ${nf} File${nf > 1 ? "s" : ""}`, k: "⌘C", run: () => copySession(s, null, fp)},
+    {t: `Copy ${nf} File${nf > 1 ? "s" : ""}`, k: "⇧⌘C", run: () => copyFilesOnly(s, fp)});
+  items.push({t: "Copy Last Output", sub: [
+    {t: "Full Answer", run: () => copyLastAnswer(s)},
+    {t: "Last Code Block", run: () => copyLastCode(s)},
+  ]});
+  items.push({sep: 1});
+  items.push({t: "Resume", k: "⌥⏎", run: () => doResume(s)});
+  items.push({t: "Reveal in Finder", run: () =>
+    api("/api/file/reveal", {path: s.path, files: [fp[0] || s.path]})
+      .then(() => toast("revealed in Finder")).catch((e) => toast(e.message))});
+  return items;
+}
+
+function copyFilesOnly(s, fp) {
+  if (!nativeCmd("copyFiles", fp))
+    api("/api/file/copy", {path: s.path, files: fp}).catch((e) => toast(e.message));
+  toast(`${fp.length} file${fp.length > 1 ? "s" : ""} copied — paste anywhere`);
+}
+
+async function copyLastCode(s) {
+  try {
+    const d = await api("/api/last_answer?path=" + encodeURIComponent(s.path));
+    if (!d.code_blocks.length) return toast("no code block in the last answer");
+    await copyText(d.code_blocks[d.code_blocks.length - 1]);
+    toast(d.code_blocks.length > 1 ? `copied last of ${d.code_blocks.length} code blocks` : "code block copied");
+  } catch (e) { toast(e.message); }
+}
+
+async function copySession(s, modeOverride, extraFiles) {
+  const m = modeOverride || opts.mode;
+  try {
+    const d = await api("/api/export", {path: s.path, mode: m, redact: opts.redact});
+    const files = [d.file, ...(extraFiles || [])];
+    if (nativeCmd("copyFiles", files)) {
+      const n = extraFiles && extraFiles.length;
+      const cap = d.mode[0].toUpperCase() + d.mode.slice(1);
+      toast(`Session copied · ${cap} · ${d.messages} messages`
+        + (n ? ` · +${n} file${n > 1 ? "s" : ""}` : ""));
+    } else {
+      await copyText(d.file);
+      toast(`saved ${d.name} — path copied (browser mode)`);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+function menuHTML(items, selIdx) {
+  return items.map((i, idx) => i.sep ? '<hr role="separator">'
+    : `<div class="mi${idx === selIdx ? " sel" : ""}${i.sub ? " has-sub" : ""}" role="menuitem" tabindex="-1"`
+      + ` aria-haspopup="${i.sub ? "menu" : "false"}" data-mi="${idx}">`
+      + `${esc(i.t)}${i.sub ? '<span class="chev">›</span>' : i.k ? `<kbd>${i.k}</kbd>` : ""}</div>`).join("");
+}
+
+function placeMenu(el, x, y, anchorRight) {
+  const r = el.getBoundingClientRect();
+  let left = anchorRight ? x - r.width : x;
+  left = Math.max(10, Math.min(left, innerWidth - r.width - 10));
+  let top = y;
+  if (top + r.height > innerHeight - 44) top = Math.max(10, y - r.height);  // flip up near footer
+  el.style.left = left + "px";
+  el.style.top = top + "px";
+}
+
+function openMenu(s, x, y, anchorRight) {
+  closeMenu();
+  const items = menuItemsFor(s);
+  if (!items.length) return;
+  menu = {items, sel: items.findIndex((i) => !i.sep && !i.h), s, sub: null};
+  const el = document.createElement("div");
+  el.id = "menu"; el.setAttribute("role", "menu");
+  el.innerHTML = menuHTML(items, menu.sel);
+  document.body.appendChild(el);
+  placeMenu(el, x, y, anchorRight);
+  el.addEventListener("mouseover", (ev) => {
+    const mi = ev.target.closest("[data-mi]");
+    if (mi) { menu.sel = +mi.dataset.mi; syncMenuSel(); }
+  });
+  el.addEventListener("click", (ev) => {
+    const mi = ev.target.closest("[data-mi]");
+    if (!mi) return;
+    const it = menu.items[+mi.dataset.mi];
+    if (it.sub) { openSub(it, mi); return; }
+    closeMenu(); it.run();
+  });
+}
+
+function syncMenuSel() {
+  document.querySelectorAll("#menu > .mi").forEach((el) =>
+    el.classList.toggle("sel", +el.dataset.mi === menu.sel));
+}
+
+function openSub(item, anchorEl) {
+  $("#submenu")?.remove();
+  const el = document.createElement("div");
+  el.id = "submenu"; el.className = "menu-pop"; el.setAttribute("role", "menu");
+  menu.sub = {items: item.sub, sel: 0};
+  el.innerHTML = menuHTML(item.sub, 0);
+  document.body.appendChild(el);
+  const r = anchorEl.getBoundingClientRect();
+  const w = el.getBoundingClientRect().width;
+  const flipLeft = r.right + w > innerWidth - 10;  // not enough room on the right
+  placeMenu(el, flipLeft ? r.left + 4 : r.right - 4, r.top, flipLeft);
+  el.addEventListener("click", (ev) => {
+    const mi = ev.target.closest("[data-mi]");
+    if (mi) { const it = item.sub[+mi.dataset.mi]; closeMenu(); it.run(); }
+  });
+}
+
+document.addEventListener("click", (ev) => {
+  if (menu && !ev.target.closest("#menu") && !ev.target.closest("[data-menu]")) closeMenu();
+}, true);
+
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch { toast("couldn't reach the clipboard — link is shown below"); return false; }
+}
+
+const FILE_ICON = (name) => {
+  const e = (name.split(".").pop() || "").toLowerCase();
+  const svg = (p) => `<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+  if (["png","jpg","jpeg","gif","webp","svg"].includes(e))
+    return svg('<rect x="1.5" y="2" width="9" height="8" rx="1.3"/><circle cx="4.3" cy="4.6" r="0.9"/><path d="M2 8.5 4.6 6l2 1.7L8.4 6l1.8 1.8"/>');
+  if (e === "pdf") return svg('<path d="M3 1.5h4l2.5 2.5V10.5H3z"/><path d="M7 1.5V4h2.5"/><path d="M4.4 8.4h3" stroke-width="1.4"/>');
+  if (["md","txt","doc","docx","rtf"].includes(e))
+    return svg('<path d="M3 1.5h4l2.5 2.5V10.5H3z"/><path d="M7 1.5V4h2.5"/><path d="M4.4 6.2h3M4.4 7.9h3"/>');
+  if (["html","htm","py","js","ts","jsx","tsx","json","sh","css","go","rs","c","cpp","java"].includes(e))
+    return svg('<path d="M4.3 4 2.4 6l1.9 2M7.7 4l1.9 2-1.9 2"/>');
+  return svg('<path d="M3 1.5h4l2.5 2.5V10.5H3z"/><path d="M7 1.5V4h2.5"/>');
+};
+const GLYPHS = {
+  "claude-code": '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 1v10M1 6h10M2.6 2.6l6.8 6.8M9.4 2.6L2.6 9.4"/></svg>',
+  "cowork": '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 1v10M1 6h10M2.6 2.6l6.8 6.8M9.4 2.6L2.6 9.4"/><circle cx="6" cy="6" r="2" fill="currentColor" stroke="none"/></svg>',
+  "codex": '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.0615v5.5826a4.504 4.504 0 0 1-4.4945 4.4849zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.8956zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>',
+};
+const fmtSize = (b) => b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB";
+const rel = (t) => {
+  const d = (Date.now()/1000 - t);
+  if (d < 3600) return Math.max(1, Math.round(d/60)) + "m";
+  if (d < 86400) return Math.round(d/3600) + "h";
+  return Math.round(d/86400) + "d";
+};
+
+let sessions = [], shares = [], stores = [], caps = {}, mode = "list", sel = 0, selPath = null, expanded = null, peekCache = {};
+const opts = Object.assign({ mode: "agent", expiry: 0, redact: true, card: false, adv: false },
+  JSON.parse(localStorage.getItem("shareit-opts-v3") || "{}"));
+if (!["human", "agent", "deep"].includes(opts.mode)) opts.mode = "agent";
+function saveOpts() { localStorage.setItem("shareit-opts-v3", JSON.stringify(opts)); }
+let optsGen = 0;  // bumps on any option change; stale async results are discarded
+function optsChanged() {  // options affect what a share contains — drop per-row links
+  optsGen++;
+  sessions.forEach((s) => { s._share = null; s._art = {}; });
+  saveOpts(); renderOpts(); render();
+}
+
+async function api(path, body) {
+  const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : undefined);
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+
+let contentHits = [], searchTimer = null;
+
+function visible() {
+  const q = $("#q").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const biggest = {};  // hide tiny resume-stub duplicates of the same conversation
+  sessions.forEach((s) => { if (!s.subagent) biggest[s.title] = Math.max(biggest[s.title] || 0, s.size); });
+  const vis = sessions.filter((s) => !s.subagent &&
+    !(s.size < 40000 && biggest[s.title] > s.size * 10) &&
+    q.every((w) => (s.title + " " + s.project + " " + s.app).toLowerCase().includes(w)));
+  const have = new Set(vis.map((s) => s.path));
+  for (const h of contentHits) {
+    const s = sessions.find((x) => x.path === h.path);
+    if (s && !have.has(s.path)) { s._snippet = h.snippet; vis.push(s); have.add(s.path); }
+  }
+  return vis;
+}
+
+function queueSearch() {
+  clearTimeout(searchTimer);
+  const q = $("#q").value.trim();
+  if (q.length < 2) { contentHits = []; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const hits = (await api("/api/search?q=" + encodeURIComponent(q))).results;
+      if ($("#q").value.trim() !== q) return;  // stale response for an older query
+      contentHits = hits;
+      render();
+    } catch {}
+  }, 180);
+}
+
+function render() {
+  mode === "list" ? renderList() : renderShares();
+}
+
+let sharesFilter = "all";
+function renderOpts() {
+  if (mode === "shares") {
+    $("#opts").innerHTML = `<span class="share-meta" style="margin-right:4px">shared links</span>
+      ${[["all", "all"], ["chats", "chats"], ["files", "files"], ["expiring", "expiring"]].map(([v, l]) =>
+        `<span role="button" tabindex="0" class="tog ${sharesFilter === v ? "on" : ""}" data-sf="${v}">${l}</span>`).join("")}`;
+    $("#opts").querySelectorAll("[data-sf]").forEach((el) => el.addEventListener("click", () => {
+      sharesFilter = el.dataset.sf; sel = 0; renderOpts(); render();
+    }));
+    return;
+  }
+  $("#opts").innerHTML = `
+    <span role="group" class="seg" data-k="mode">
+      <span role="button" tabindex="0" data-v="human" class="${opts.mode === "human" ? "on" : ""}" title="for people: a clean reader page — conversation + created files, no tool logs">human</span>
+      <span role="button" tabindex="0" data-v="agent" class="${opts.mode === "agent" ? "on" : ""}" title="for agent handoff: markdown with a handoff manifest, abridged tool context + created files">agent</span>
+      <span role="button" tabindex="0" data-v="deep" class="${opts.mode === "deep" ? "on" : ""}" title="maximum context: reasoning, fuller tool output, plus modified/read project files (size-capped)">deep</span>
+    </span>
+    <span role="group" class="seg" data-k="expiry">${[[0,"∞"],[24,"1d"],[72,"3d"],[168,"7d"]].map(([h, l]) =>
+      `<span role="button" tabindex="0" data-v="${h}" class="${opts.expiry === h ? "on" : ""}">${l}</span>`).join("")}</span>
+    <span role="button" tabindex="0" class="tog icon" id="adv" title="more options">⋯</span>
+    ${opts.adv ? `
+    <span role="button" tabindex="0" class="tog icon ${opts.redact ? "on" : ""}" data-t="redact"
+      title="${opts.redact ? "secrets hidden (best-effort scrub) — click to share verbatim" : "NOT redacted — click to hide secrets"}">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M6 1 10.2 2.6v3C10.2 8.6 8.4 10.3 6 11 3.6 10.3 1.8 8.6 1.8 5.6v-3z"/></svg><span class="lbl">scrub secrets</span></span></span>
+    <span role="button" tabindex="0" class="tog icon ${opts.card ? "on" : ""}" data-t="card"
+      title="${opts.card ? "stat card copied with the link — click for link only" : "copy a stat card (model · turns · files) with the link"}">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="1.5" y="2.5" width="9" height="7" rx="1.5"/><path d="M3.5 5h5M3.5 7h3"/></svg><span class="lbl">stat card</span></span>` : ""}
+    ${opts.adv ? '<span role="button" tabindex="0" class="tog icon" id="reset" title="reset options to defaults">↺<span class="lbl">reset</span></span>' : ""}
+    <span class="share-meta" style="margin-left:auto" title="what a share will contain">${opts.mode} · ${opts.expiry === 0 ? "no expiry" : opts.expiry === 24 ? "1d" : opts.expiry / 24 + "d"}${opts.redact ? "" : " · RAW"}</span>
+    ${opts.redact ? "" : '<span class="warn-note">⚠ verbatim</span>'}`;
+  $("#adv").addEventListener("click", () => { opts.adv = !opts.adv; saveOpts(); renderOpts(); });
+  $("#reset")?.addEventListener("click", () => {
+    Object.assign(opts, { mode: "agent", expiry: 0, redact: true, card: false, adv: true });
+    optsChanged(); toast("options reset");
+  });
+  $("#opts").querySelectorAll(".seg span").forEach((el) => el.addEventListener("click", () => {
+    const k = el.parentElement.dataset.k;
+    opts[k] = k === "expiry" ? +el.dataset.v : el.dataset.v;
+    if (opts.mode === "deep" && !localStorage.getItem("shareit-deep-warned")) {
+      localStorage.setItem("shareit-deep-warned", "1");
+      toast("Deep shares reasoning, detailed tool output and more files — review before sending.");
+    }
+    optsChanged();
+  }));
+  $("#opts").querySelectorAll(".tog").forEach((el) => el.addEventListener("click", () => {
+    opts[el.dataset.t] = !opts[el.dataset.t];
+    optsChanged();
+  }));
+}
+
+let lastCopied = null;
+let qlOpen = false;
+window.__qlClosed = () => { qlOpen = false; };
+function flashCopied(key) {
+  lastCopied = key;
+  setTimeout(() => { if (lastCopied === key) { lastCopied = null; render(); } }, 2400);
+  render();
+}
+
+function shareBtnHtml(s) {
+  const st = s._share;
+  if (st === "busy") return '<button class="rowshare" disabled>…</button>';
+  if (st && st.url) {
+    const fresh = lastCopied === s.path;
+    return `<button class="rowshare${fresh ? " done" : ""}" data-copy="${esc(st.url)}" title="already shared — click to copy the link">${fresh ? "copied ✓" : "copy link"}</button>`;
+  }
+  return '<button class="rowshare" data-share="1">share <kbd>⏎</kbd></button>';
+}
+
+function renderList() {
+  const vis = visible();
+  const query = $("#q").value.trim();
+  if (selPath) {
+    const i = vis.findIndex((s) => s.path === selPath);
+    if (i >= 0) sel = i;
+  }
+  if (sel >= vis.length) sel = Math.max(0, vis.length - 1);
+  selPath = vis[sel]?.path || null;
+  const list = $("#list");
+  list.innerHTML = vis.length ? vis.map((s, i) => `
+    <div class="row${i === sel ? " sel" : ""}" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
+      <div class="row-line">
+        <span class="glyph" title="${esc(s.app)}">${GLYPHS[s.app] || ""}</span>
+        <span class="t">${esc(s.title)}${s._snippet && $("#q").value.trim().length >= 2
+          ? `<span class="snip">${esc(s._snippet).replace(/«/g, "<b>").replace(/»/g, "</b>")}</span>` : ""}</span>
+        ${s.arts ? `<span class="clip" title="${s.arts} file${s.arts > 1 ? "s" : ""} created — shared along with the session"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.arts}</span>` : ""}
+        <span class="m">${esc(s.project || "")}&ensp;${rel(s.mtime)}</span>
+        ${shareBtnHtml(s)}
+        <button class="iconbtn dots" data-menu="1" aria-label="actions">•••</button>
+      </div>
+      ${expanded === s.path ? cardHtml(s) : ""}
+    </div>`).join("") : (query
+      ? `<div class="empty">No sessions match “${esc(query)}”<div class="esc-hint"><kbd>Esc</kbd> clear search</div></div>`
+      : '<div class="empty">No sessions found</div>');
+  const counts = {};
+  sessions.filter((s) => !s.subagent).forEach((s) => counts[s.app] = (counts[s.app] || 0) + 1);
+  const footClass = {"claude-code": "c-claude", "cowork": "c-cowork", "codex": "c-codex"};
+  const footName = {"claude-code": "claude"};
+  const tally = Object.entries(counts).filter(([, n]) => n > 0)
+    .sort(([, a], [, b]) => b - a)
+    .map(([app, n]) => `<span class="${footClass[app] || ""}">${n} ${footName[app] || app}</span>`)
+    .join(" · ");
+  $("#foot").innerHTML = !vis.length && query
+    ? `<span class="brand">Share-It</span><span class="grow"></span><span><kbd>Esc</kbd> clear search</span>`
+    : `<span class="brand">Share-It</span><span class="fdiv">${tally}</span>
+     <span class="grow"></span><span>${(() => {
+       const ex = vis.find((x) => x.path === expanded);
+       if (ex?._sel?.size) return `<kbd>⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌥click</kbd> reveal in Finder`;
+       return `<kbd>⌘C</kbd> copy session · <kbd>⌘K</kbd> actions · <kbd>→</kbd> peek · <kbd>⌥⏎</kbd> resume`;
+     })()}</span>`;
+  const lnk = list.querySelector("#lnk[data-fresh]");
+  if (lnk) {  // highlight once, right after creation — not on every re-render
+    lnk.select();
+    const s = visible().find((x) => x.path === expanded);
+    if (s?._share) delete s._share.fresh;
+  }
+  const cur = list.querySelector(".row.sel");
+  if (cur) cur.scrollIntoView({block: "nearest"});
+}
+
+/* one delegated listener — survives every re-render, no stale handlers */
+function sessionAt(ev) {
+  const row = ev.target.closest(".row[data-path]");
+  return row ? sessions.find((s) => s.path === row.dataset.path) : null;
+}
+$("#list").addEventListener("click", (ev) => {
+  if (mode !== "list") return sharesClick(ev);
+  const s = sessionAt(ev);
+  if (!s) return;
+  const t = ev.target;
+  const rowBtn = t.closest(".rowshare");
+  if (rowBtn) {
+    if (rowBtn.dataset.copy) { copyText(rowBtn.dataset.copy); flashCopied(s.path); }
+    else doShare(s);
+    return;
+  }
+  const dots = t.closest("[data-menu]");
+  if (dots) {
+    if (menu && menu.s === s) { closeMenu(); return; }
+    const r = dots.getBoundingClientRect();
+    openMenu(s, r.right, r.bottom + 6, true);
+    return;
+  }
+  const art = t.closest("[data-art]");
+  if (art) {
+    if (ev.detail === 2) {  // double-click: open in the default app
+      api("/api/file/open", {path: s.path, files: [art.dataset.art]})
+        .catch((e) => toast(e.message));
+      return;
+    }
+    if (ev.altKey) {  // ⌥-click: reveal in Finder
+      api("/api/file/reveal", {path: s.path, files: [art.dataset.art]})
+        .then(() => toast("revealed in Finder")).catch((e) => toast(e.message));
+      return;
+    }
+    s._sel = s._sel || new Set();
+    s._sel.has(art.dataset.art) ? s._sel.delete(art.dataset.art) : s._sel.add(art.dataset.art);
+    return render();
+  }
+  if (t.closest("#art-all")) {
+    const p = peekCache[s.path];
+    const all = [...(p?.artifacts || []), ...(p?.reads || [])].map((a) => a.path);
+    s._sel = (s._sel?.size === all.length) ? new Set() : new Set(all);
+    return render();
+  }
+  if (t.closest("#art-go")) return void shareSelectedArtifacts(s);
+  if (t.closest("#art-copy")) {
+    const files = [...s._sel];
+    if (nativeCmd("copyFiles", files))
+      toast(`${files.length} file${files.length > 1 ? "s" : ""} on the clipboard — paste anywhere`);
+    else api("/api/file/copy", {path: s.path, files})
+      .then((d) => toast(`${d.count} file${d.count > 1 ? "s" : ""} on the clipboard — paste anywhere`))
+      .catch((err) => toast(err.message));
+    return;
+  }
+  if (t.closest("#resume")) return void doResume(s);
+  if (t.closest("#last-answer")) return void copyLastAnswer(s);
+  const agentBtn = t.closest("[data-agentcopy]");
+  if (agentBtn) {
+    copyText("Continue this task from the shared session below. Preserve prior decisions, "
+      + "inspect the included files and begin with the last unresolved request:\n\n"
+      + agentBtn.dataset.agentcopy);
+    toast("agent handoff copied");
+    return;
+  }
+  const openBtn = t.closest("[data-open]");
+  if (openBtn) { api("/api/open_url", {url: openBtn.dataset.open}).catch((e) => toast(e.message)); return; }
+  const copyBtn = t.closest("[data-copy]");
+  if (copyBtn) { copyText(copyBtn.dataset.copy); flashCopied(s.path); return; }
+  if (t.closest(".row-line")) { sel = +t.closest(".row").dataset.i; selPath = s.path; toggle(s); }
+});
+$("#list").addEventListener("contextmenu", (ev) => {
+  const artChip = ev.target.closest("[data-art]");
+  if (!artChip) {  // row-level right-click: unified action menu
+    const row = ev.target.closest(".row");
+    if (!row) return;
+    ev.preventDefault();
+    if (menu) { closeMenu(); return; }  // second right-click closes, not re-opens
+    if (mode === "list") {
+      const s = sessionAt(ev);
+      if (!s) return;
+      sel = +row.dataset.i; selPath = s.path;
+      renderList();
+      openMenu(s, ev.clientX, ev.clientY);
+    } else {
+      sel = +row.dataset.i; render();
+      openMenu(null, ev.clientX, ev.clientY);
+    }
+    return;
+  }
+  // chip right-click: select + Quick Look
+  ev.preventDefault();
+  const s = sessionAt(ev);
+  if (!s) return;
+  s._sel = s._sel || new Set();
+  s._sel.add(artChip.dataset.art);
+  render();
+  if (nativeCmd("quickLook", [artChip.dataset.art])) qlOpen = true;
+  else api("/api/file/preview", {path: s.path, files: [artChip.dataset.art]})
+      .catch((e) => toast(e.message));
+});
+$("#list").addEventListener("mouseover", (ev) => {
+  const row = ev.target.closest(".row[data-i]");
+  if (!row || sel === +row.dataset.i) return;
+  $("#list").querySelector(".row.sel")?.classList.remove("sel");
+  sel = +row.dataset.i;
+  selPath = visible()[sel]?.path;
+  row.classList.add("sel");
+});
+
+function expiryLabel(st) {
+  if (!st || !st.url) return "";
+  const left = st.expires == null ? "no expiry"
+    : "expires ~" + Math.max(0, (st.expires - Date.now()/1000) / 86400).toFixed(1) + "d";
+  return `<span class="share-meta" title="hosted in your own private bucket — S3 deletes finite links within ~a day of the target">${left}</span>`;
+}
+
+function cardHtml(s) {
+  const p = peekCache[s.path];
+  const terms = $("#q").value.toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+  const hi = (t) => {
+    let h = esc(t);
+    for (const w of terms)
+      h = h.replace(new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"), "<b>$1</b>");
+    return h;
+  };
+  const peek = !p ? '<div class="peek"><div><span class="share-meta">Loading preview…</span></div></div>'
+    : `<div class="peek">${p.messages.slice(0, 4).map((m) =>
+        `<div><i>${m.role === "user" ? "you" : "ai"}</i><span>${hi(m.text)}</span></div>`).join("")
+      || '<div><span class="share-meta">no readable messages</span></div>'}</div>`;
+  s._sel = s._sel || new Set();
+  const chip = (a, cls) => {
+    const st = (s._art || {})[a.path];
+    const on = s._sel.has(a.path);
+    const mark = st === "busy" ? "…" : lastCopied === a.path ? "✓" : "";
+    const kindWord = {"a-new": "created", "a-mod": "modified", "a-ref": "read (referenced)"}[cls];
+    const tip = `${kindWord} · ${a.path}${a.size != null ? ` · ${fmtSize(a.size)}` : ""}` +
+      `\nclick select · 2×click open · right-click Quick Look · ⌘C copy · ⌥click reveal` +
+      `${a.head ? "\n\n" + a.head.slice(0, 90) + "…" : ""}`;
+    return `<span class="art ${cls}${on ? " picked" : ""}" data-art="${esc(a.path)}" title="${esc(tip)}">
+      <span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
+  };
+  const groups = p ? [
+    ...(p.artifacts || []).filter((a) => a.kind === "created").map((a) => chip(a, "a-new")),
+    ...(p.artifacts || []).filter((a) => a.kind === "modified").map((a) => chip(a, "a-mod")),
+    ...(p.reads || []).map((a) => chip(a, "a-ref")),
+  ] : [];
+  const catNote = p?.pending && s.arts
+    ? '<div class="ctl"><span class="share-meta">cataloguing files… (a moment, then reopen)</span></div>' : "";
+  const nSel = s._sel.size;
+  const nAll = (p?.artifacts || []).length + (p?.reads || []).length;
+  const arts = groups.length ? `<div class="ctl arts">${groups.join("")}
+    ${nAll > 1 ? `<span role="button" tabindex="0" class="tog" id="art-all" title="${nSel === nAll ? "unselect all" : "select every file"}">${nSel === nAll ? "none" : "all"}</span>` : ""}
+    ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⌘C</kbd></button>
+      <button class="share small" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"} ⏎</button>` : ""}
+  </div>` : "";
+  const resumeLabel = s.app === "cowork" && caps.claude_app ? "open in Claude app"
+    : s.app === "codex" && caps.codex_app ? "open in Codex"
+    : s.app === "codex" ? "resume in terminal (codex)" : "resume in terminal (claude)";
+  const resume = `<div class="ctl"><span class="tog resume" id="resume"
+    title="reopen this session where it lives">▸ ${resumeLabel}</span>
+    <span class="tog resume" id="last-answer" title="copy the final assistant response (⇧⌘C)">⧉ copy last answer</span></div>`;
+  const st = s._share;
+  const linkGlyph = '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5 7l3.5-3.5M4 5H2.8A1.8 1.8 0 0 0 2.8 8.6H4M8 3.4h1.2a1.8 1.8 0 0 1 0 3.6H8"/></svg>';
+  const link = st && st.url ? `
+    ${opts.card && st.card ? `<div class="cardline">${esc(st.card)}</div>` : ""}
+    <div class="linkrow"><span class="share-meta" title="link to the whole session">${linkGlyph} session</span>
+      <input readonly value="${esc(st.url)}" id="lnk"${st.fresh ? ' data-fresh="1"' : ""}>
+      ${expiryLabel(st)}<button class="iconbtn" data-copy="${esc(opts.card && st.card ? st.card + "\n" + st.url : st.url)}">copy</button>
+      ${opts.mode !== "human" ? `<button class="iconbtn" data-agentcopy="${esc(st.url)}" title="copy an instruction + link for another agent">for agent</button>` : ""}
+      <button class="iconbtn" data-open="${esc(st.url)}">open</button></div>` : "";
+  return `<div class="card">${peek}${arts || catNote}${link}${resume}</div>`;
+}
+
+async function toggle(s) {
+  if (!s) return;
+  expanded = expanded === s.path ? null : s.path;
+  render();
+  if (expanded && !peekCache[s.path]) {
+    try { peekCache[s.path] = await api("/api/peek?path=" + encodeURIComponent(s.path)); }
+    catch { peekCache[s.path] = {messages: [{role: "assistant", text: "unreadable"}], artifacts: []}; }
+    if (expanded === s.path) render();
+  }
+}
+
+async function copyLastAnswer(s) {
+  try {
+    const d = await api("/api/last_answer?path=" + encodeURIComponent(s.path));
+    if (!d.answer) return toast("no assistant answer found");
+    await copyText(d.answer);
+    toast(d.code_blocks.length
+      ? `last answer copied (${d.code_blocks.length} code block${d.code_blocks.length > 1 ? "s" : ""} inside)`
+      : "last answer copied");
+  } catch (e) { toast(e.message); }
+}
+
+async function doResume(s) {
+  try {
+    const d = await api("/api/resume", {path: s.path});
+    if (d.app) toast("opening in " + (d.target || "the app"));
+    else if (d.launched) toast("opened in Terminal");
+    else { await copyText(d.command); toast("command copied — paste in your terminal"); }
+  } catch (e) { toast(e.message); }
+}
+
+async function shareSelectedArtifacts(s) {
+  const files = [...s._sel];
+  s._art = s._art || {};
+  files.forEach((f) => { if (!s._art[f]?.url) s._art[f] = "busy"; });
+  render();
+  const results = await Promise.all(files.map(async (f) => {
+    if (s._art[f]?.url) return s._art[f].url;
+    try {
+      const d = await api("/api/share/artifact", {path: s.path, file: f, expires_hours: opts.expiry});
+      s._art[f] = {url: d.url, expires: d.expires};
+      return d.url;
+    } catch (e) { s._art[f] = null; toast(`${f.split("/").pop()}: ${e.message}`); return null; }
+  }));
+  const lines = files.filter((f, i) => results[i])
+    .map((f, _, arr) => arr.length > 1 ? `${f.split("/").pop()}: ${s._art[f].url}` : s._art[f].url);
+  if (lines.length) {
+    copyText(lines.join("\n"));
+    files.forEach((f) => flashCopied(f));
+    s._sel.clear();
+  }
+  render();
+}
+
+async function doShareArtifact(s, file) {
+  s._art = s._art || {};
+  const st = s._art[file];
+  if (st === "busy") return;
+  if (st && st.url) { copyText(st.url); flashCopied(file); return; }
+  s._art[file] = "busy"; render();
+  try {
+    const d = await api("/api/share/artifact", {path: s.path, file, expires_hours: opts.expiry});
+    s._art[file] = {url: d.url, provider: d.provider, expires: d.expires};
+    copyText(d.url);
+    flashCopied(file);
+    return;
+  } catch (e) { s._art[file] = null; toast(e.message); }
+  render();
+}
+
+async function doShare(s, modeOverride) {
+  if (!s || s._share === "busy") return;
+  if (s._share?.url && !modeOverride) { copyText(s._share.url); return; }
+  s._share = "busy"; render();
+  const gen = optsGen;
+  try {
+    const d = await api("/api/share", {path: s.path, redact: opts.redact,
+      mode: modeOverride || opts.mode, expires_hours: opts.expiry});
+    if (gen !== optsGen) { s._share = null; render(); return; }  // options changed mid-flight
+    s._share = {url: d.url, provider: d.provider, expires: d.expires, card: d.card, fresh: true};
+    copyText(opts.card && d.card ? `${d.card}\n${d.url}` : d.url);
+    flashCopied(s.path);
+    if (expanded !== s.path) toggle(s);  // reveal the link row
+    return;
+  } catch (e) {
+    s._share = null; if (gen === optsGen) toast(e.message);
+  }
+  render();
+}
+
+async function refresh() {
+  try {
+    Object.keys(peekCache).forEach((k) => {  // pending catalogues may be done now
+      if (peekCache[k]?.pending) delete peekCache[k];
+    });
+    const data = await api("/api/sessions");
+    const keep = new Map(sessions.map((s) => [s.path, s]));
+    sessions = data.sessions.map((n) => {
+      const old = keep.get(n.path);
+      return old && old.mtime === n.mtime ? Object.assign(n, {_share: old._share, _art: old._art}) : n;
+    });
+    stores = data.stores || [];
+    render();
+  } catch {}
+}
+
+const pendingDeletes = {};
+function visibleShares() {
+  const q = $("#q").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const isGone = (s) => s.deleted
+    || (s.expires != null && (s.expires - Date.now()/1000) <= 0);
+  return shares.filter((s) => !isGone(s)
+    && (sharesFilter === "all"
+        || (sharesFilter === "files" && s.artifact)
+        || (sharesFilter === "chats" && !s.artifact)
+        || (sharesFilter === "expiring" && s.expires != null))
+    && q.every((w) => (s.title + " " + s.url).toLowerCase().includes(w)));
+}
+
+function renderShares() {
+  const list = $("#list");
+  const live = visibleShares();
+  if (sel >= live.length) sel = Math.max(0, live.length - 1);
+  const nGone = shares.length - shares.filter((s) => !s.deleted
+    && (s.expires == null || s.expires - Date.now()/1000 > 0)).length;
+  // group artifact links under their parent session share
+  const groups = [];
+  const byPath = {};
+  for (const s of live) {
+    if (s.artifact) {
+      const g = byPath[s.path];
+      if (g) { g.files.push(s); continue; }
+    }
+    const g = {head: s, files: [], path: s.path};
+    if (s.artifact) g.files.push(s);
+    groups.push(g); byPath[s.path] = g;
+  }
+  const expLabel = (s) => {
+    if (s.expires == null) return "no expiry";
+    const d = (s.expires - Date.now()/1000) / 86400;
+    if (d < 1) return "expires in " + Math.max(1, Math.round(d * 24)) + "h";
+    if (d < 1.5) return "expires tomorrow";
+    return "expires in " + Math.round(d) + "d";
+  };
+  list.innerHTML = groups.length ? groups.map((g, i) => {
+    const s = g.head;
+    const canDelete = s.provider === "hosted";
+    const nf = g.files.length + (s.artifact ? 0 : 0);
+    const meta = `${s.artifact ? "file" : ({msgs:"human",full:"agent",chat:"human"}[s.mode]||s.mode||"chat")}`
+      + `${g.files.length && !s.artifact ? " · " + g.files.length + " files" : ""} · ${expLabel(s)}`
+      + (s.redacted ? "" : " · RAW") + (s.provider !== "hosted" ? " · legacy" : "");
+    return `<div class="row${i === sel ? " sel" : ""}" data-i="${i}">
+      <div class="row-line">
+        <span class="t"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a></span>
+        <span class="share-meta">${meta}</span>
+        <button class="iconbtn" data-copy="${esc(s.url)}" aria-label="copy link">copy</button>
+        <button class="iconbtn" data-openlink="${esc(s.url)}">open</button>
+        ${canDelete ? `<button class="iconbtn" data-del="${esc(s.url)}" aria-label="delete link">delete</button>`
+          : `<button class="iconbtn" disabled title="legacy backend — expires on its own">·</button>`}
+      </div></div>`;
+  }).join("") : '<div class="empty">no live links</div>';
+  $("#foot").innerHTML = `<span>${groups.length} live${nGone ? ` · ${nGone} expired hidden` : ""}</span>
+    <span class="grow"></span><span><kbd>⏎</kbd>/<kbd>⌘C</kbd> copy · <kbd>esc</kbd> back</span>`;
+}
+
+async function sharesClick(ev) {
+  const a = ev.target.closest(".row .t a");
+  if (a) { ev.preventDefault(); api("/api/open_url", {url: a.href}).catch((e) => toast(e.message)); return; }
+  const ob = ev.target.closest("[data-openlink]");
+  if (ob) { api("/api/open_url", {url: ob.dataset.openlink}).catch((e) => toast(e.message)); return; }
+  const copyBtn = ev.target.closest("[data-copy]");
+  if (copyBtn) {
+    copyText(copyBtn.dataset.copy); copyBtn.textContent = "✓";
+    setTimeout(() => { copyBtn.textContent = "copy"; }, 900);
+    return;
+  }
+  const undoBtn = ev.target.closest("[data-undo]");
+  if (undoBtn) {
+    clearTimeout(pendingDeletes[undoBtn.dataset.undo]);
+    delete pendingDeletes[undoBtn.dataset.undo];
+    toast("kept"); render();
+    return;
+  }
+  const delBtn = ev.target.closest("[data-del]");
+  if (delBtn) {
+    const url = delBtn.dataset.del;
+    pendingDeletes[url] = setTimeout(async () => {  // 5s undo window before it's real
+      delete pendingDeletes[url];
+      try { await api("/api/share/delete", {url}); await loadShares(); }
+      catch (e) { toast(e.message); }
+      render();
+    }, 5000);
+    toast("deleting in 5s — press undo to keep");
+    render();
+  }
+}
+
+async function loadShares() { shares = (await api("/api/shares")).shares; }
+
+$("#q").addEventListener("input", () => {
+  sel = 0; expanded = null;
+  if (mode === "list") queueSearch();
+  render();
+});
+$("#q").addEventListener("keydown", (e) => {  // ⌘A inside the field never bubbles as beep
+  if ((e.metaKey || e.ctrlKey) && e.key === "a") e.stopPropagation();
+});
+$("#btn-shares").addEventListener("click", async () => {
+  mode = mode === "list" ? "shares" : "list";
+  $("#btn-shares").classList.toggle("on", mode === "shares");
+  $("#q").value = ""; $("#q").placeholder = mode === "shares" ? "Search shared links…" : "Search sessions…";
+  if (mode === "shares") await loadShares();
+  sel = 0; renderOpts(); render();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (menu) {  // menu is the topmost layer
+    const sub = $("#submenu");
+    if (sub && menu.sub) {
+      const items = menu.sub.items;
+      if (e.key === "Escape" || e.key === "ArrowLeft") { e.preventDefault(); sub.remove(); menu.sub = null; return; }
+      if (e.key === "ArrowDown") { e.preventDefault(); menu.sub.sel = Math.min(menu.sub.sel + 1, items.length - 1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); menu.sub.sel = Math.max(menu.sub.sel - 1, 0); }
+      else if (e.key === "Enter") { e.preventDefault(); const it = items[menu.sub.sel]; closeMenu(); it.run(); return; }
+      sub.querySelectorAll(".mi").forEach((el) => el.classList.toggle("sel", +el.dataset.mi === menu.sub.sel));
+      return;
+    }
+    const sels = menu.items.map((it, i) => (it.h || it.sep) ? null : i).filter((i) => i !== null);
+    if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const cur = sels.indexOf(menu.sel);
+      menu.sel = sels[Math.min(Math.max(cur + (e.key === "ArrowDown" ? 1 : -1), 0), sels.length - 1)];
+      syncMenuSel();
+      return;
+    }
+    if (e.key === "ArrowRight" && menu.items[menu.sel]?.sub) {
+      e.preventDefault();
+      openSub(menu.items[menu.sel], document.querySelector(`#menu [data-mi="${menu.sel}"]`));
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const it = menu.items[menu.sel]; if (!it) return;
+      if (it.sub) { openSub(it, document.querySelector(`#menu [data-mi="${menu.sel}"]`)); return; }
+      closeMenu(); it.run();
+      return;
+    }
+    return;
+  }
+  if (e.key === "Escape" && qlOpen) {  // next layer: Quick Look
+    e.preventDefault();
+    nativeCmd("closeQuickLook", []);
+    qlOpen = false;
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {  // ⌘K: actions
+    e.preventDefault();
+    if (mode === "shares") { openMenu(null, innerWidth / 2 - 115, 160); return; }
+    const vis = visible();
+    const s = vis[sel];
+    if (s) {
+      const row = document.querySelector(`.row[data-i="${sel}"]`);
+      const r = row?.getBoundingClientRect();
+      openMenu(s, r ? r.right : innerWidth / 2 + 130, r ? r.bottom + 4 : 160, true);
+    }
+    return;
+  }
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".seg span, .tog")) {
+    e.preventDefault(); e.target.click(); return;
+  }
+  if (mode === "shares") {
+    const live = visibleShares();
+    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, live.length - 1); e.preventDefault(); render(); }
+    else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); e.preventDefault(); render(); }
+    else if (e.key === "Enter" || ((e.metaKey || e.ctrlKey) && e.key === "c"
+             && !window.getSelection()?.toString())) {
+      e.preventDefault();
+      const s = live[sel];
+      if (s) { copyText(s.url); toast("link copied"); }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      if ($("#q").value) { $("#q").value = ""; render(); }
+      else {
+        mode = "list"; $("#btn-shares").classList.remove("on");
+        $("#q").placeholder = "Search sessions…";
+        renderOpts(); render();
+      }
+    } else if (!e.metaKey && !e.ctrlKey && e.key.length === 1) $("#q").focus();
+    return;
+  }
+  const vis = visible();
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "c" && mode === "list") {
+    if (smartCopy()) e.preventDefault();
+    return;
+  }
+  if (e.key === "ArrowDown") { sel = Math.min(sel + 1, vis.length - 1); selPath = vis[sel]?.path; e.preventDefault(); render(); }
+  else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); selPath = vis[sel]?.path; e.preventDefault(); render(); }
+  else if (e.key === "Enter" && mode === "list") {
+    e.preventDefault();  // otherwise the search input beeps
+    const s = vis[sel];
+    if (e.altKey) { if (s) doResume(s); }
+    else if (s && expanded === s.path && s._sel?.size) shareSelectedArtifacts(s);
+    else doShare(s);
+  }
+  else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "c"
+           && mode === "list") {
+    e.preventDefault();
+    const s = vis[sel];
+    if (!s) return;
+    const files = [...(s.art_list || []), ...(s.read_list || [])].map((f) => f.path);
+    if (files.length) copyFilesOnly(s, files);
+    else copyLastAnswer(s);
+  }
+  else if (e.key === "ArrowRight" && mode === "list") { toggle(vis[sel]); e.preventDefault(); }
+  else if (e.key === "Escape") {
+    e.preventDefault();  // no system beep
+    if (expanded) { expanded = null; render(); }
+    else if (mode === "shares") { mode = "list"; $("#btn-shares").classList.remove("on"); render(); }
+    else if ($("#q").value) { $("#q").value = ""; contentHits = []; render(); }
+    else { closeMenu(); nativePost("hide"); }
+  } else if (!e.metaKey && !e.ctrlKey && e.key.length === 1) $("#q").focus();
+});
+
+(async () => {
+  try { sessions = (await api("/api/sessions")).sessions; }
+  catch (e) { $("#list").innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  renderOpts();
+  render();
+  $("#q").focus();
+})();
+window.addEventListener("focus", () => { $("#q").focus(); refresh(); });
+window.addEventListener("blur", closeMenu);  // panel hidden → menu must not linger
+</script>
+</body>
+</html>

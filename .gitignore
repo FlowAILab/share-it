@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+macos/share-it-bin
+macos/build/
+dist/
+*.dmg
+worker/.wrangler/
+worker/node_modules/
+.DS_Store
+default_config.json
