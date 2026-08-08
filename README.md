@@ -1,8 +1,8 @@
 <h1 align="center">Share-It</h1>
 
 <p align="center">
-  <b>Hand off any AI-coding session to another agent — files and all, in one click.</b><br>
-  <sub>Works across Claude Code · Codex · Cursor · Cowork. Your sessions, one keystroke away.</sub>
+  <b>Get a shareable link to any AI-coding session — in one click.</b><br>
+  <sub>Your whole session, at a URL. Works with Claude Code · Codex · Cursor · Cowork.</sub>
 </p>
 
 <p align="center">
@@ -16,33 +16,29 @@
 
 ---
 
-Your best prompts and agent runs are trapped on your laptop. Share-It makes them
-one keystroke away — and one click to pass on.
+Press **⌥S**, find your session, hit **⏎** — the link is on your clipboard.
+That link holds the **complete session**: the whole conversation and the files it
+produced. Send it to a teammate, or paste it into another agent to pick up right
+where you left off.
 
 ### Core
 
-- **🤝 Agent handoff** — turn any session into a clean context bundle another agent
-  can continue from: the conversation, the decisions, the last open request, **and the
-  files it produced**. Paste the link into Claude, Codex, or Cursor and it picks up
-  exactly where you left off. Works across all of them.
-- **🔗 One-click link** — press ⏎, get a short public link on your clipboard. Send it
-  to a teammate or drop it into any chat.
-- **📎 One-click files** — copy the real artifacts a session created (PDFs, images,
-  code) straight to Finder, Slack, or email — actual files, not screenshots.
+- **🔗 One-click link** — the full session at a short URL. That's the whole app.
 
-That's it: **⌥S → find it → share it.** No exporting, no zipping, no hunting for paths.
+### Also handy
 
-### Also
-
-Reader-page mode for humans · resume a session in its original app · full-text search ·
-keeps sessions your tools auto-delete · configurable link expiry.
+- **📋 Copy the session** — grab the conversation as a file, no upload.
+- **📎 Copy the files** — the artifacts a session made (PDFs, images, code) straight to
+  Finder, Slack, or email — real files, not screenshots.
+- Reader-page mode for humans · resume a session in its original app · full-text search ·
+  keeps sessions your tools auto-delete · link expiry (∞ / 1d / 3d / 7d).
 
 ### Private by default
 
 Nothing leaves your machine until you press share. Your data is **never used for
 training** — it's yours, on your own storage. Secrets are scrubbed automatically and
-the preview shows exactly what goes out. Links are unguessable, expire on your terms
-(∞ / 1d / 3d / 7d), and delete in one click.
+the preview shows exactly what goes out. Links are unguessable, expire on your terms,
+and delete in one click.
 
 ### Build from source
 
