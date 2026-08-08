@@ -147,9 +147,20 @@ def parse_claude(path):
         t = obj.get("type")
         if t not in ("user", "assistant") or (obj.get("isSidechain") and not keep_sidechain):
             continue
-        if obj.get("isMeta"):
-            continue
         content = (obj.get("message") or {}).get("content")
+        if obj.get("isMeta"):
+            # meta messages are system-injected — EXCEPT pasted-image-only turns
+            # land here (isMeta, no text). Keep those images; drop everything else.
+            if t == "user" and isinstance(content, list):
+                for block in content:
+                    if block.get("type") != "image":
+                        continue
+                    src = block.get("source") or {}
+                    m = (_media_entry(src.get("media_type"), src.get("data"), media_count)
+                         if src.get("type") == "base64" else None)
+                    if m:
+                        messages.append({"role": "user", "text": "[image]", "media": [m]})
+            continue
         if t == "user":
             if isinstance(content, str):
                 if content.strip() and not _is_injected(_ANSI.sub("", content).lstrip()):

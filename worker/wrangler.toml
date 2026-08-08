@@ -8,3 +8,11 @@ bucket_name = "share-it-links"
 
 [triggers]
 crons = ["0 3 * * *"]   # daily purge of expired objects
+
+# aggregate abuse bound: cap uploads regardless of who holds the fleet token
+# (native Cloudflare rate limiting — no per-request KV cost)
+[[unsafe.bindings]]
+name = "UPLOAD_LIMIT"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }   # 120 upload ops / minute / worker

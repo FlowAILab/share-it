@@ -69,10 +69,21 @@ function serveObject(obj, name, head) {
   return new Response(head ? null : obj.body, { headers });
 }
 
+async function limited(req, env) {
+  if (!env.UPLOAD_LIMIT) return false;
+  const ip = req.headers.get("CF-Connecting-IP") || "anon";
+  try { return !(await env.UPLOAD_LIMIT.limit({ key: ip })).success; }
+  catch { return false; }   // limiter unavailable → fail open, never break sharing
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const path = url.pathname;
+    // throttle the write plane (uploads / new bundles) before doing any work
+    if (req.method === "POST" && (path === "/up" || path === "/bundle/new"
+        || /^\/bundle\/[A-Za-z0-9_-]{16,32}\//.test(path)) && await limited(req, env))
+      return new Response("rate limited", { status: 429 });
 
     // ---------- bundle write plane ----------
     if (req.method === "POST" && path === "/bundle/new") {
