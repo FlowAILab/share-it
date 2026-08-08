@@ -62,7 +62,7 @@ def render_markdown(session, messages, redact_secrets=True, include_thinking=Fal
                     messages_only=False, tool_output_limit=2000, tool_input_limit=800,
                     artifact_links=None, read_files=None, stats=None, mode="agent",
                     last_request="", cwd=None, expiry_label="", media_base=None):
-    src = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}.get(session["source"], session["source"].title())
+    src = _src_label(session)
     date = time.strftime("%Y-%m-%d", time.localtime(session.get("last_used") or session.get("mtime") or time.time()))
     n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
                  and (m.get("text") or "").strip())
@@ -288,6 +288,17 @@ def _anchor_latest(parts):
     return "".join(parts)
 
 
+SRC_LABELS = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor",
+              "pi": "Pi", "opencode": "OpenCode", "goose": "Goose",
+              "continue": "Continue", "cline": "Cline", "roo": "Roo Code",
+              "copilot": "Copilot"}
+
+
+def _src_label(session):
+    src = session.get("source", "")
+    return SRC_LABELS.get(src, src.title() or "Session")
+
+
 _LOGOS = {
     "claude": ('<svg viewBox="0 0 12 12" width="16" height="16" fill="none" '
                'stroke="#d97757" stroke-width="1.5" stroke-linecap="round">'
@@ -370,7 +381,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
                 tool_output_limit=2000, tool_input_limit=800,
                 mode_label="human", expiry_label="", media_base=None):
     """Reader page: the conversation as a chat, agent work folded between turns."""
-    src_label = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}.get(session["source"], session["source"].title())
+    src_label = _src_label(session)
     logo = _LOGOS.get(session["source"], _LOGOS["codex"])
     date = time.strftime("%B %-d, %Y", time.localtime(session.get("last_used") or session.get("mtime") or time.time()))
 
@@ -466,8 +477,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
 
 def share_card(session, stats, n_files, show_tools=True):
     """One-line stat block copied alongside the link."""
-    src = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}.get(
-        session["source"], session["source"].title())
+    src = _src_label(session)
     parts = [src]
     if session.get("model"):
         parts.append(session["model"])

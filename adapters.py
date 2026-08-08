@@ -9,6 +9,12 @@ import os
 
 import cursor as _cursor
 import parsers
+import pi as _pi
+import opencode as _opencode
+import goose as _goose
+import continuedev as _continue
+import cline as _cline
+import copilot as _copilot
 
 
 class Adapter:
@@ -21,8 +27,13 @@ class Adapter:
         raise NotImplementedError
 
     def owns(self, real_path):
-        return any(real_path.startswith(os.path.realpath(r) + os.sep)
-                   for r in self.roots() if os.path.isdir(r))
+        # ids may be "<file>" or "<file>#<subid>" (multi-session SQLite stores)
+        base = real_path.split("#", 1)[0]
+        for r in self.roots():
+            rr = os.path.realpath(r)
+            if base == rr or base.startswith(rr + os.sep):
+                return True
+        return False
 
     def parse(self, path):
         """path → unified message list (role: user|assistant|thinking|tool)."""
@@ -148,9 +159,112 @@ class CursorAdapter(Adapter):
         return _cursor.parse(path)
 
 
+class PiAdapter(Adapter):
+    id = "pi"; label = "Pi"; note = "coding agent (JSONL)"
+
+    def roots(self):
+        return [_pi.ROOT]
+
+    def parse(self, path):
+        return _pi.parse(path)
+
+    def discover(self):
+        return _pi.discover()
+
+
+class OpenCodeAdapter(Adapter):
+    id = "opencode"; label = "OpenCode"; note = "coding agent (SQLite)"
+
+    def roots(self):
+        return [_opencode._DATA]
+
+    def parse(self, path):
+        return _opencode.parse(path)
+
+    def discover(self):
+        return _opencode.discover()
+
+
+class GooseAdapter(Adapter):
+    id = "goose"; label = "Goose"; note = "coding agent (SQLite)"
+
+    def roots(self):
+        return [_goose._DIR]
+
+    def parse(self, path):
+        return _goose.parse(path)
+
+    def discover(self):
+        return _goose.discover()
+
+
+class ContinueAdapter(Adapter):
+    id = "continue"; label = "Continue"; note = "editor extension"
+
+    def roots(self):
+        return [_continue._SESS]
+
+    def parse(self, path):
+        return _continue.parse(path)
+
+    def discover(self):
+        return _continue.discover()
+
+
+class _ClineFamily(Adapter):
+    ext = ""
+
+    def roots(self):
+        rs = [os.path.join(b, self.ext, "tasks") for b in _cline._BASES]
+        if self.ext == "saoudrizwan.claude-dev":
+            rs.append(os.path.expanduser("~/.cline/data/tasks"))
+        return rs
+
+    def parse(self, path):
+        return _cline.parse(path)
+
+    def discover(self):
+        return _cline.discover(self.ext)
+
+
+class ClineAdapter(_ClineFamily):
+    id = "cline"; label = "Cline"; note = "editor extension"; ext = "saoudrizwan.claude-dev"
+
+
+class RooAdapter(_ClineFamily):
+    id = "roo"; label = "Roo Code"; note = "editor extension"; ext = "rooveterinaryinc.roo-cline"
+
+
+class CopilotAdapter(Adapter):
+    id = "copilot"; label = "Copilot"; note = "VS Code chat"
+
+    def roots(self):
+        return _copilot._BASES
+
+    def parse(self, path):
+        return _copilot.parse(path)
+
+    def discover(self):
+        return _copilot.discover()
+
+
 ADAPTERS = [ClaudeAdapter(), CodexAdapter()]
-if _cursor.available():           # only surface Cursor when it's installed
+if _cursor.available():           # only surface a client when it's installed
     ADAPTERS.append(CursorAdapter())
+if _pi.available():
+    ADAPTERS.append(PiAdapter())
+if _opencode.available():
+    ADAPTERS.append(OpenCodeAdapter())
+if _goose.available():
+    ADAPTERS.append(GooseAdapter())
+if _continue.available():
+    ADAPTERS.append(ContinueAdapter())
+if _cline.available("saoudrizwan.claude-dev"):
+    ADAPTERS.append(ClineAdapter())
+if _cline.available("rooveterinaryinc.roo-cline"):
+    ADAPTERS.append(RooAdapter())
+if _copilot.available():
+    ADAPTERS.append(CopilotAdapter())
 
 
 def by_id(source):

@@ -179,16 +179,13 @@ def _fix_state_perms():
 
 
 def _allowed(path):
-    real = os.path.realpath(path)
-    if "#" in path:  # non-file harness ids (Cursor SQLite) — the adapter decides
-        try:
-            adapters.for_path(path)
-            return True
-        except ValueError:
-            return False
-    return real.endswith(".jsonl") and any(
-        real.startswith(os.path.realpath(root) + os.sep)
-        for root in adapters.allowed_roots())
+    # any client adapter that claims this id (its own storage roots) is allowed;
+    # cache membership in _session_entry is the real gate
+    try:
+        adapters.for_path(path)
+        return True
+    except ValueError:
+        return False
 
 
 def _session_entry(path):
@@ -209,7 +206,7 @@ def _stores(sessions):
     for s in sessions:
         counts[s["app"]] = counts.get(s["app"], 0) + 1
     cowork_dir = os.path.isdir(os.path.join(parsers.COWORK_META, "local-agent-mode-sessions"))
-    return [
+    base = [
         {"id": "claude-code", "label": "Claude Code", "count": counts.get("claude-code", 0),
          "available": os.path.isdir(parsers.CLAUDE_ROOT), "note": "CLI · desktop · IDE"},
         {"id": "cowork", "label": "Cowork", "count": counts.get("cowork", 0),
@@ -220,6 +217,15 @@ def _stores(sessions):
         {"id": "chatgpt", "label": "ChatGPT", "count": 0, "available": False,
          "note": "cloud-only — no local transcripts"},
     ]
+    curated = {"claude-code", "cowork", "codex", "chatgpt"}
+    for ad in adapters.ADAPTERS:
+        if ad.id in curated or ad.id == "claude":
+            continue
+        n = counts.get(ad.id, 0)
+        if n or True:  # only registered (installed) adapters are in ADAPTERS
+            base.append({"id": ad.id, "label": ad.label, "count": n,
+                         "available": True, "note": ad.note})
+    return base
 
 
 def _render_opts(body):
@@ -902,8 +908,12 @@ def _peek_texts(path, mtime):
         hit = _peekmem.get(path)
     if hit and hit[0] == mtime:
         return hit[1], hit[2]
-    if "#" in path:  # non-file harness (Cursor) — parse via its adapter
-        full = adapters.for_path(path).parse(path)
+    try:
+        adapter = adapters.for_path(path)
+    except ValueError:
+        adapter = None
+    if adapter is not None and adapter.id not in ("claude", "codex"):
+        full = adapter.parse(path)   # generic client — no jsonl tail tricks
         clip = lambda t, n: t[:n] + ("…" if len(t) > n else "")
         texts = [{"role": m["role"], "text": clip(" ".join(m["text"].split()), 280)}
                  for m in full if m.get("text", "").strip()
