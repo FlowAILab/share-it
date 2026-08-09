@@ -25,27 +25,34 @@ body.browser {
   background: radial-gradient(1200px 700px at 50% -10%, #23262c, #101216);
 }
 body.browser #panel {
-  background: rgba(18, 17, 22, 0.97);
+  background: rgba(16, 16, 20, 0.985);
   backdrop-filter: blur(30px) saturate(1.2); -webkit-backdrop-filter: blur(28px) saturate(1.2);
-  border: 1px solid var(--hair); border-radius: 16px;
-  width: min(600px, 94vw); height: min(440px, 86vh); margin: auto;
+  border: 1px solid var(--hair); border-radius: 18px;
+  width: min(620px, 94vw); height: min(460px, 86vh); margin: auto;
   box-shadow: 0 24px 80px rgba(0,0,0,0.5);
 }
 /* native app: the WKWebView is transparent, so THIS is the only opaque layer —
    keep it near-solid dark so a light window/wallpaper behind can't wash it out
    (Raycast/Spotlight keep their overlay this dark). */
 #panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden;
-  background: rgba(18, 17, 22, 0.985); }
+  position: relative;
+  background: rgba(16, 16, 20, 0.92); }
 
-#top { display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; }
+#top { display: flex; align-items: center; gap: 10px; padding: 14px 18px 12px; flex: none; }
+#top .mag { flex: none; width: 16px; height: 16px; color: rgba(255,255,255,0.35); }
+#top .mag svg { display: block; width: 100%; height: 100%; }
 #q {
-  flex: 1; background: none; border: none; outline: none; color: var(--ink);
-  font: 300 21px -apple-system, system-ui, sans-serif; caret-color: var(--ink);
+  flex: 1; background: none; border: none; outline: none; color: rgba(255,255,255,0.92);
+  font: 400 20px/26px -apple-system, "SF Pro Display", system-ui, sans-serif;
+  caret-color: var(--ink); min-width: 0;
 }
-#q::placeholder { color: var(--faint); }
-#q { border-bottom: 1px solid transparent; }
-#q:focus-visible { border-image: linear-gradient(90deg, transparent, rgba(217,130,95,0.35), rgba(255,255,255,0.14), transparent) 1; border-bottom: 1px solid; box-shadow: none; }
-.seg span:focus-visible, .tog:focus-visible, .iconbtn:focus-visible, .rowshare:focus-visible {
+#q::placeholder { color: rgba(255,255,255,0.30); }
+#q-clear { flex: none; width: 24px; height: 24px; border: none; border-radius: 12px;
+  background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); cursor: pointer;
+  font: 13px/1 -apple-system, system-ui; display: none; align-items: center; justify-content: center; }
+#q-clear:hover { background: rgba(255,255,255,0.14); color: var(--ink); }
+#q-clear.show { display: inline-flex; }
+.seg span:focus-visible, .tog:focus-visible, .iconbtn:focus-visible, .rowicon:focus-visible {
   outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
 .tog, .seg span { min-height: 24px; display: inline-flex; align-items: center; }
 .tog .lbl { margin-left: 5px; font-size: 11px; }
@@ -56,21 +63,27 @@ body.browser #panel {
 .iconbtn:hover, .iconbtn.on { color: var(--ink); background: var(--fill); }
 #hr { height: 1px; background: var(--hair); margin: 0 14px; }
 #opts { padding: 0 18px 10px; }
-.rowshare {
-  border: none; cursor: pointer; border-radius: 8px; font: 600 11.5px -apple-system, system-ui;
-  padding: 4px 0; width: 86px; flex: none; text-align: center; color: #101216; visibility: hidden;
-  background: linear-gradient(110deg, rgba(255,255,255,0.95), rgba(255,255,255,0.7), rgba(255,255,255,0.95));
-  background-size: 220% 100%; animation: sheen 5s ease infinite;
-}
-.row.sel .rowshare, .row:hover .rowshare, .rowshare:focus-visible { opacity: 1; visibility: visible; }
-.rowshare:disabled { opacity: 0.6; }
-.rowshare.done { background: none; color: var(--ink); border: 1px solid var(--hair); animation: none; }
+/* row accessory overlay — never in normal flow, never reserves space */
+.acc { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: none; align-items: center; gap: 2px; padding-left: 26px;
+  background: linear-gradient(90deg, transparent, var(--acc-bg) 24px, var(--acc-bg)); }
+.row.sel .acc, .row-line:hover .acc { display: inline-flex; }
+.rowicon { width: 28px; height: 28px; border: none; border-radius: 7px; cursor: pointer;
+  background: none; color: rgba(255,255,255,0.62); display: inline-flex;
+  align-items: center; justify-content: center; padding: 0; }
+.rowicon svg { width: 15px; height: 15px; display: block; }
+.rowicon:hover { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.95); }
+.rowicon.ok { color: #8fd8a0; }
 
-#list { flex: 1; overflow-y: auto; padding: 8px 10px; }
+#list { flex: 1; overflow-y: auto; padding: 6px 8px; }
 #list::-webkit-scrollbar { width: 0; }
-.row { border-radius: 10px; cursor: default; }
-.row-line { display: flex; align-items: center; gap: 10px; padding: 9px 10px; min-width: 0; }
-.row.sel > .row-line { background: var(--fill-hi); border-radius: 10px; }
+.row { border-radius: 9px; cursor: default; }
+.row-line { position: relative; display: flex; align-items: center; gap: 10px;
+  min-height: 40px; padding: 0 10px; min-width: 0; border-radius: 9px;
+  --acc-bg: transparent; }
+.row-line:hover { background: rgba(255,255,255,0.055); --acc-bg: #26262b; }
+.row.sel > .row-line { background: rgba(255,255,255,0.09);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); --acc-bg: #2c2c31; }
 .glyph { width: 14px; height: 14px; flex: none; color: var(--dim); }
 .row[data-app="claude-code"] .glyph, #foot .c-claude { color: #d9825f; }
 .row[data-app="cowork"] .glyph, #foot .c-cowork { color: #c9a2e8; }
@@ -83,8 +96,12 @@ body.browser #panel {
 .row[data-app="roo"] .glyph { color: #86c58c; }
 .row[data-app="copilot"] .glyph { color: #9aa6b2; }
 .glyph svg { width: 100%; height: 100%; display: block; }
-.row .t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row .m { flex: none; font-size: 11px; color: var(--dim); }
+.row .t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font: 450 14px/20px -apple-system, "SF Pro Text", system-ui; color: rgba(255,255,255,0.92); }
+.row .m { flex: none; margin-left: auto; font-size: 12px; color: rgba(255,255,255,0.46);
+  font-variant-numeric: tabular-nums; display: inline-flex; gap: 8px; align-items: baseline; }
+.row .m .proj { color: rgba(255,255,255,0.40); }
+.row .m .when { min-width: 30px; text-align: right; color: rgba(255,255,255,0.52); }
 .row .clip { flex: none; display: inline-flex; align-items: center; gap: 2px;
              font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .row .clip svg { width: 11px; height: 11px; }
@@ -130,7 +147,7 @@ body.browser #panel {
 .share:hover { filter: brightness(1.06); }
 .share:disabled { opacity: 0.5; animation: none; }
 @keyframes sheen { 0%,100% { background-position: 0% 0; } 50% { background-position: 100% 0; } }
-@media (prefers-reduced-motion: reduce) { .share, .rowshare { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .share { animation: none; } }
 .linkrow { display: flex; gap: 8px; align-items: center; }
 .linkrow input {
   flex: 1; background: var(--fill); border: 1px solid var(--hair); border-radius: 8px;
@@ -202,9 +219,17 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .applogo svg { width: 12px; height: 12px; }
 
 #foot {
-  display: flex; gap: 14px; padding: 9px 18px; border-top: 1px solid var(--hair);
-  font-size: 11px; color: var(--faint);
+  display: flex; gap: 12px; align-items: center; min-height: 32px; padding: 0 14px;
+  border-top: 1px solid var(--hair); font-size: 11px; color: rgba(255,255,255,0.46);
+  flex: none;
 }
+.srcf { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px;
+  border-radius: 11px; cursor: pointer; color: rgba(255,255,255,0.55);
+  font-variant-numeric: tabular-nums; }
+.srcf:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.85); }
+.srcf.on { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.92); }
+.srcf .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+#hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #foot .grow { flex: 1; }
 #foot .brand { font-weight: 700; letter-spacing: -0.01em; color: var(--ink); opacity: 0.9; }
 #foot .fdiv { position: relative; padding-left: 12px; margin-left: 8px; }
@@ -232,8 +257,14 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--dim); }
 .row.sel .dots, .row:hover .dots { visibility: visible; }
 .rowmsg { visibility: hidden; opacity: 0.85; }
 .row.sel .rowmsg, .row:hover .rowmsg { visibility: visible; }
+#tip { position: absolute; z-index: 40; max-width: 240px; padding: 5px 9px;
+  background: rgba(30,30,34,0.98); border: 1px solid var(--hair); border-radius: 8px;
+  font: 12px/16px -apple-system, system-ui; color: rgba(255,255,255,0.85);
+  pointer-events: none; opacity: 0; transition: opacity 0.12s ease-out; }
+#tip.show { opacity: 1; }
+#tip kbd { color: rgba(255,255,255,0.5); margin-left: 6px; }
 #toast {
-  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(8px);
+  position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%) translateY(8px);
   background: var(--fill-hi); color: var(--ink); border: 1px solid var(--hair);
   padding: 7px 16px; border-radius: 9px; font-size: 12px; opacity: 0;
   transition: opacity 0.15s, transform 0.15s; pointer-events: none; z-index: 20;
@@ -245,8 +276,10 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--dim); }
 <body>
 <div id="panel">
   <div id="top">
-    <input id="q" placeholder="Search sessions…" autocomplete="off" spellcheck="false">
-    <button class="iconbtn" id="btn-shares" title="shared links">↗</button>
+    <span class="mag"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.6 10.6 14 14"/></svg></span>
+    <input id="q" placeholder="Search sessions and messages…" autocomplete="off" spellcheck="false">
+    <button id="q-clear" aria-label="clear search">✕</button>
+    <button class="iconbtn" id="btn-shares" data-tip="Shared links">↗</button>
   </div>
   <div id="opts" class="ctl"></div>
   <div id="hr"></div>
@@ -284,6 +317,35 @@ function nativeCmdAck(cmd, files, extra) {
   return p;
 }
 const ackFailed = (ok) => ok === false;   // null = unverified, not a failure
+/* in-panel tooltip portal — native title= clips at the panel edge */
+let _tipT = null;
+function hideTip() {
+  clearTimeout(_tipT); _tipT = null;
+  $("#tip")?.classList.remove("show");
+}
+document.addEventListener("mouseover", (ev) => {
+  const el = ev.target.closest?.("[data-tip]");
+  hideTip();
+  if (!el) return;
+  _tipT = setTimeout(() => {
+    let tip = $("#tip");
+    if (!tip) { tip = document.createElement("div"); tip.id = "tip"; $("#panel").appendChild(tip); }
+    const [label, key] = el.dataset.tip.split("|");
+    tip.innerHTML = esc(label) + (key ? `<kbd>${esc(key)}</kbd>` : "");
+    const p = $("#panel").getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    tip.style.left = "0px"; tip.style.top = "0px"; tip.classList.add("show");
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let x = r.left - p.left + r.width / 2 - tw / 2;
+    let y = r.bottom - p.top + 8;
+    x = Math.max(12, Math.min(x, p.width - tw - 12));
+    if (y + th > p.height - 40) y = r.top - p.top - th - 8;   // flip above near footer
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  }, 480);
+}, true);
+document.addEventListener("click", hideTip, true);
+$("#list")?.addEventListener?.("scroll", hideTip);
+
 // never alert(): modal dialogs freeze the panel (and automation). inline toast instead
 function toast(msg) {
   let el = $("#toast");
@@ -294,11 +356,12 @@ function toast(msg) {
   el.textContent = msg; el.classList.add("show");
   el.setAttribute("role", "status"); el.removeAttribute("aria-hidden");
   clearTimeout(toast._t);
+  const isErr = /fail|error|invalid|no longer|interrupted|unauthor/i.test(msg);
   toast._t = setTimeout(() => {
     el.classList.remove("show");
     el.setAttribute("aria-hidden", "true"); el.removeAttribute("role");
     setTimeout(() => { if (!el.classList.contains("show")) el.textContent = ""; }, 300);
-  }, 3000);
+  }, isErr ? 4000 : 2000);
 }
 function smartCopy() {
   // 1) real text selection anywhere → let the engine copy it
@@ -411,7 +474,7 @@ function menuItemsFor(s) {
     {t: "Copy context", k: "⏎", run: () => copyContext(s)},
     {t: "Share link", k: "⌘L", run: () => doShare(s)},
     {t: "Send result", k: "⌘R", run: () => sendResult(s)},
-    {t: "Send result (message only)", k: "⌥⌘R", run: () => sendResult(s, true)},
+    {t: "Send result as message", k: "⌥⌘R", run: () => sendResult(s, true)},
   ];
   if (nf && nSelM)
     items.push({t: `Copy files (${payload})`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
@@ -591,6 +654,10 @@ const rel = (t) => {
 };
 
 let sessions = [], shares = [], stores = [], caps = {}, mode = "list", sel = 0, selPath = null, expanded = null, peekCache = {};
+let srcFilter = "all";
+const SRC_TIPS = {"claude-code": "Claude Code", "cowork": "Cowork", "codex": "Codex",
+  "cursor": "Cursor", "pi": "Pi", "opencode": "OpenCode", "goose": "Goose",
+  "continue": "Continue", "cline": "Cline", "roo": "Roo Code", "copilot": "Copilot"};
 /* v4 options: two knobs only — deep (⌘D) and link expiry (⋯ menu).
    Scrubbing is always on server-side; the human/agent mode toggle is gone. */
 const _v3 = JSON.parse(localStorage.getItem("shareit-opts-v3") || "{}");
@@ -636,6 +703,7 @@ function visible() {
     }
   });
   const base = sessions.filter((s) => !s.subagent &&
+    (srcFilter === "all" || s.app === srcFilter) &&
     !(s.size < 40000 && biggest[s.title] > s.size * 10) &&
     !(s.thread && (s.last_used || s.mtime) < newestByThread[s.thread]));
   base.forEach((s) => { s._contentOnly = false; });
@@ -653,17 +721,21 @@ function visible() {
   return vis;
 }
 
+let searching = false;
 function queueSearch() {
   clearTimeout(searchTimer);
   const q = $("#q").value.trim();
-  if (q.length < 2) { contentHits = []; return; }
+  sessions.forEach((x) => { x._snippet = null; });   // never show a stale snippet
+  if (q.length < 2) { contentHits = []; searching = false; return; }
+  searching = true;
   searchTimer = setTimeout(async () => {
     try {
       const hits = (await api("/api/search?q=" + encodeURIComponent(q))).results;
       if ($("#q").value.trim() !== q) return;  // stale response for an older query
       contentHits = hits;
-      render();
-    } catch {}
+    } catch { contentHits = []; }
+    searching = false;
+    render();
   }, 180);
 }
 
@@ -698,18 +770,21 @@ function flashCopied(key) {
   render();
 }
 
-function shareBtnHtml(s) {
+const I_BUBBLE = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 0 1-8.1 4.8L2.5 13.5l0.8-2.6A5.5 5.5 0 1 1 13.5 8z"/></svg>';
+const I_STACK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><rect x="5.2" y="5.2" width="8" height="8" rx="1.8"/><path d="M10.8 5.2V4.4a1.6 1.6 0 0 0-1.6-1.6H4.4a1.6 1.6 0 0 0-1.6 1.6v4.8a1.6 1.6 0 0 0 1.6 1.6h0.8"/></svg>';
+const I_LINK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M6.6 9.4l4-4M6 5.4H4.2a2.4 2.4 0 1 0 0 4.8H6M10 5.4h1.8a2.4 2.4 0 1 1 0 4.8H10"/></svg>';
+const I_CHECK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-6.5"/></svg>';
+function accessoryHtml(s) {
   const st = s._share;
-  const msgBtn = `<button class="rowshare rowmsg" data-msg="1"
-    title="copy the last answer as a message — pastes as text anywhere (⌥⌘R)">msg</button>`;
-  if (st === "busy") return '<button class="rowshare" disabled>…</button>';
-  if (st && st.url) {
-    const fresh = lastCopied === s.path;
-    return `${msgBtn}<button class="rowshare${fresh ? " done" : ""}" data-copy="${esc(st.url)}" title="already shared — click to copy the link">${fresh ? "copied ✓" : "copy link"}</button>`;
-  }
   const fresh = lastCopied === s.path;
-  return `${msgBtn}<button class="rowshare${fresh ? " done" : ""}" data-ctx="1"
-    title="copy this session's context for another agent">${fresh ? "copied ✓" : "copy <kbd>⏎</kbd>"}</button>`;
+  const mid = st && st.url
+    ? `<button class="rowicon" data-copy="${esc(st.url)}" data-tip="Copy share link">${fresh ? I_CHECK : I_LINK}</button>`
+    : `<button class="rowicon${fresh ? " ok" : ""}" data-ctx="1" data-tip="Copy context|⏎">${fresh ? I_CHECK : I_STACK}</button>`;
+  return `<span class="acc">
+    <button class="rowicon" data-msg="1" data-tip="Send result as message|⌥⌘R">${I_BUBBLE}</button>
+    ${st === "busy" ? '<button class="rowicon" disabled>…</button>' : mid}
+    <button class="iconbtn dots" data-menu="1" aria-label="actions" data-tip="More actions|⌘K">•••</button>
+  </span>`;
 }
 
 function renderList() {
@@ -723,37 +798,43 @@ function renderList() {
   selPath = vis[sel]?.path || null;
   const list = $("#list");
   list.innerHTML = vis.length ? vis.map((s, i) => `
-    <div class="row${i === sel ? " sel" : ""}" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
+    <div class="row${i === sel ? " sel" : ""}" role="option" aria-selected="${i === sel}" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
       <div class="row-line">
-        <span class="glyph" title="${esc(s.app)}">${GLYPHS[s.app] || GLYPHS._fallback}</span>
+        <span class="glyph" data-tip="${esc(SRC_TIPS[s.app] || s.app)}">${GLYPHS[s.app] || GLYPHS._fallback}</span>
         <span class="t">${hiText(s.title)}${s._snippet && $("#q").value.trim().length >= 2
           ? `<span class="snip">${esc(s._snippet).replace(/«/g, "<b>").replace(/»/g, "</b>")}</span>` : ""}</span>
-        ${(s.n_primary ?? s.arts) ? `<span class="clip" title="${s.n_primary ?? s.arts} deliverable${(s.n_primary ?? s.arts) > 1 ? "s" : ""} ship with a share (${s.arts} file${s.arts > 1 ? "s" : ""} total available)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.n_primary ?? s.arts}</span>` : ""}
-        <span class="m">${esc(s.project || "")}&ensp;<span title="last used ${rel(s.last_used || s.mtime)} ago">${rel(s.last_used || s.mtime)}</span></span>
-        ${shareBtnHtml(s)}
-        <button class="iconbtn dots" data-menu="1" aria-label="actions">•••</button>
+        <span class="m">
+          ${(s.n_primary ?? s.arts) ? `<span class="clip" data-tip="${s.n_primary ?? s.arts} deliverable${(s.n_primary ?? s.arts) > 1 ? "s" : ""} · ${s.arts} file${s.arts > 1 ? "s" : ""} total"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.n_primary ?? s.arts}</span>` : ""}
+          <span class="proj">${esc(s.project || "")}</span><span class="when">${rel(s.last_used || s.mtime)}</span>
+        </span>
+        ${accessoryHtml(s)}
       </div>
       ${expanded === s.path ? cardHtml(s) : ""}
     </div>`).join("") : (query
-      ? `<div class="empty">No sessions match “${esc(query)}”<div class="esc-hint"><kbd>Esc</kbd> clear search</div></div>`
+      ? (searching
+        ? '<div class="empty">Searching messages…</div>'
+        : `<div class="empty">No sessions match “${esc(query)}”<div class="esc-hint"><kbd>Esc</kbd> clear search</div></div>`)
       : '<div class="empty">No sessions found</div>');
   const counts = {};
   sessions.filter((s) => !s.subagent).forEach((s) => counts[s.app] = (counts[s.app] || 0) + 1);
   const footClass = {"claude-code": "c-claude", "cowork": "c-cowork", "codex": "c-codex"};
   const footName = {"claude-code": "claude"};
-  const tally = Object.entries(counts).filter(([, n]) => n > 0)
-    .sort(([, a], [, b]) => b - a)
-    .map(([app, n]) => `<span class="${footClass[app] || ""}">${n} ${footName[app] || app}</span>`)
-    .join(" · ");
-  $("#foot").innerHTML = !vis.length && query
-    ? `<span class="brand">Share-It</span><span class="grow"></span><span><kbd>Esc</kbd> clear search</span>`
-    : `<span class="brand">Share-It</span><span class="fdiv">${tally}</span>
-     <span class="grow"></span><span>${(() => {
-       if (!IS_NATIVE) return `<kbd>⏎</kbd> copy context · click buttons for the rest`;
-       const ex = vis.find((x) => x.path === expanded);
-       if (ex?._sel?.size) return `<kbd>⏎</kbd> copy context · <kbd>⇧⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌘R</kbd> send result`;
-       return `<kbd>⏎</kbd> copy context · <kbd>⌘L</kbd> share link · <kbd>⌘R</kbd> result+files · <kbd>⌥⌘R</kbd> msg · <kbd>⌘K</kbd> more`;
-     })()}</span>`;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const top = Object.entries(counts).filter(([, n]) => n > 0)
+    .sort(([, a], [, b]) => b - a).slice(0, 3);
+  const chips = [`<span class="srcf${srcFilter === "all" ? " on" : ""}" data-src="all" role="button" tabindex="0">All ${total}</span>`]
+    .concat(top.map(([app, n]) =>
+      `<span class="srcf${srcFilter === app ? " on" : ""} ${footClass[app] || ""}" data-src="${esc(app)}" role="button" tabindex="0"><span class="dot"></span>${footName[app] || app} ${n}</span>`))
+    .join("");
+  const nvis = vis.length;
+  $("#foot").innerHTML = `${chips}<span class="grow"></span><span id="hint">${
+    !vis.length && query ? `<kbd>Esc</kbd> clear`
+    : query ? `${nvis} result${nvis === 1 ? "" : "s"}${IS_NATIVE ? ` · <kbd>⏎</kbd> Copy context` : ""}`
+    : IS_NATIVE ? `<kbd>⏎</kbd> Copy context · <kbd>⌘K</kbd> Actions` : `click a row for actions`}</span>`;
+  $("#foot").querySelectorAll("[data-src]").forEach((el) => el.addEventListener("click", () => {
+    srcFilter = (srcFilter === el.dataset.src) ? "all" : el.dataset.src;
+    sel = 0; selPath = null; render();
+  }));
   const lnk = list.querySelector("#lnk[data-fresh]");
   if (lnk) {  // highlight once, right after creation — not on every re-render
     lnk.select();
@@ -762,6 +843,8 @@ function renderList() {
   }
   const cur = list.querySelector(".row.sel");
   if (cur) cur.scrollIntoView({block: "nearest"});
+  // an expanded card must be fully visible — its action bar lives at the bottom
+  list.querySelector(".card")?.scrollIntoView({block: "nearest"});
 }
 
 /* one delegated listener — survives every re-render, no stale handlers */
@@ -774,13 +857,10 @@ $("#list").addEventListener("click", (ev) => {
   const s = sessionAt(ev);
   if (!s) return;
   const t = ev.target;
-  const rowBtn = t.closest(".rowshare");
-  if (rowBtn) {
-    if (rowBtn.dataset.msg) sendResult(s, true);   // msg = last answer as text
-    else if (rowBtn.dataset.copy) { copyText(rowBtn.dataset.copy).then((ok) => ok && flashCopied(s.path)); }
-    else copyContext(s);   // row button = the primary verb, same as ⏎
-    return;
-  }
+  const msgIcon = t.closest("[data-msg]");
+  if (msgIcon) { hideTip(); sendResult(s, true); return; }   // send result as message
+  const ctxIcon = t.closest("[data-ctx]");
+  if (ctxIcon) { hideTip(); copyContext(s); return; }        // primary verb, same as ⏎
   const dots = t.closest("[data-menu]");
   if (dots) {
     if (menu && menu.s === s) { closeMenu(); return; }
@@ -806,7 +886,6 @@ $("#list").addEventListener("click", (ev) => {
     s._sel.has(art.dataset.art) ? s._sel.delete(art.dataset.art) : s._sel.add(art.dataset.art);
     return render();
   }
-  if (t.closest("#chat-copy")) return void copyContext(s);
   if (t.closest("#chips-more")) { s._chipsOpen = !s._chipsOpen; render(); return; }
   if (t.closest("#art-all")) {
     const p = peekCache[s.path];
@@ -903,8 +982,7 @@ function cardHtml(s) {
   const lastTxt = p && p.last && !(p.messages.slice(0, 3).some((m) => m.text === p.last)) ? p.last : "";
   const lastBlock = lastTxt ? `<div class="gap" title="conversation continues">⋯</div>
     <div class="msg a last"><i class="${roleCls}">${appShort(s)}</i><span title="this is what ⧉ copy last answer copies">${hi(lastTxt)}</span></div>` : "";
-  const chatHdr = `<div class="chathdr"><span>chat</span>
-    <button class="share small ghost" id="chat-copy" title="copy the full context for another agent — inline when small, else bundle + path">copy context ${IS_NATIVE ? '<kbd class="ghostkey">⏎</kbd>' : ""}</button></div>`;
+  const chatHdr = '<div class="chathdr"><span>chat</span></div>';
   const peek = !p ? '<div class="peekbox"><div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div></div>'
     : `<div class="peekbox">${chatHdr}<div class="peek">${head + lastBlock
       || '<div class="msg"><span class="share-meta">no readable messages</span></div>'}</div></div>`;
@@ -915,10 +993,8 @@ function cardHtml(s) {
     const mark = st === "busy" ? "…" : lastCopied === a.path ? "✓" : "";
     const selmark = on ? '<b class="selmark">✓</b>' : "";
     const kindWord = {"a-new": "created", "a-mod": "modified", "a-ref": "read (referenced)"}[cls];
-    const tip = `${kindWord} · ${a.path}${a.size != null ? ` · ${fmtSize(a.size)}` : ""}` +
-      `\nclick select · 2×click open · right-click Quick Look · ⇧⌘C copy · ⌥click reveal` +
-      `${a.head ? "\n\n" + a.head.slice(0, 90) + "…" : ""}`;
-    return `<span class="art ${cls}${on ? " picked" : ""}" role="button" tabindex="0" data-art="${esc(a.path)}" title="${esc(tip)}">
+    const tip = `${kindWord}${a.size != null ? ` · ${fmtSize(a.size)}` : ""} — click to select, 2×click opens`;
+    return `<span class="art ${cls}${on ? " picked" : ""}" role="button" tabindex="0" data-art="${esc(a.path)}" data-tip="${esc(tip)}">
       ${selmark}<span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
   };
   const allChips = p ? [
@@ -944,9 +1020,9 @@ function cardHtml(s) {
   const nSel = s._sel.size;
   const nAll = (p?.artifacts || []).length + (p?.reads || []).length;
   const arts = groups.length ? `<div class="ctl arts">${groups.join("")}
-    ${nAll > 1 ? `<span role="button" tabindex="0" class="tog" id="art-all" title="${nSel === nAll ? "unselect all" : "select every file"}">${nSel === nAll ? "none" : "all"}</span>` : ""}
+    ${nAll > 1 ? `<span role="button" tabindex="0" class="tog" id="art-all">${nSel === nAll ? "Clear" : "Select all"}</span>` : ""}
     ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⇧⌘C</kbd></button>
-      <button class="share small" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"}</button>` : ""}
+      <button class="share small ghost" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"}</button>` : ""}
   </div>` : "";
   const nPrim = prim.size || s.n_primary || 0;
   const truth = (s.n_msgs || s.n_images || nAll)
@@ -960,16 +1036,16 @@ function cardHtml(s) {
   const kbd = (k) => IS_NATIVE ? ` <kbd class="ghostkey">${k}</kbd>` : "";
   const actions = `<div class="ctl actbar">
     <button class="actbtn primary" id="act-context"
-      title="full context for another agent on this Mac — inline when small, else an immutable bundle + path (text only)">Copy context${kbd("⏎")}</button>
+      data-tip="Full session for another agent on this Mac|⏎">Copy context${kbd("⏎")}</button>
     <button class="actbtn" id="act-share"
-      title="same context as a hosted link for an agent on another device · expiry ${EXPIRY_LABELS[opts.expiry] || "∞"} (change in ⌘K)">Share link <span class="dimlbl">${EXPIRY_LABELS[opts.expiry] || "∞"}</span>${kbd("⌘L")}</button>
+      data-tip="Hosted context link for another device|⌘L">Share link <span class="dimlbl">${EXPIRY_LABELS[opts.expiry] || "∞"}</span>${kbd("⌘L")}</button>
     <button class="actbtn" id="act-result"
-      title="last answer + the deliverable files in one copy — file-aware apps (Gmail, terminals, Finder) take the FILES; text fields get the message">Send result${kbd("⌘R")}</button>
+      data-tip="Last answer + files — file-aware apps take the files|⌘R">Send result${kbd("⌘R")}</button>
     <button class="actbtn" id="act-msg"
-      title="last answer as a message only — pastes as text everywhere (Gmail, Codex, Slack, anywhere)">msg${kbd("⌥⌘R")}</button>
+      data-tip="Send result as message — pastes as text anywhere|⌥⌘R">msg${kbd("⌥⌘R")}</button>
     ${openTarget ? `<button class="actbtn" id="resume"
-      title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>${openTarget}</button>` : ""}
-    ${opts.deep ? '<span class="chip-deep" title="deep mode: full tool output + reasoning ship (⌘D toggles)">deep</span>' : ""}
+      data-tip="Reopen this session|⌥⏎"><span class="applogo">${appLogo(s)}</span>${openTarget}</button>` : ""}
+    ${opts.deep ? '<span class="chip-deep" data-tip="Deep mode on — full tool output + reasoning|⌘D">deep</span>' : ""}
   </div>`;
   const st = s._share;
   const linkGlyph = '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5 7l3.5-3.5M4 5H2.8A1.8 1.8 0 0 0 2.8 8.6H4M8 3.4h1.2a1.8 1.8 0 0 1 0 3.6H8"/></svg>';
@@ -1222,9 +1298,14 @@ async function sharesClick(ev) {
 async function loadShares() { shares = (await api("/api/shares")).shares; }
 
 $("#q").addEventListener("input", () => {
-  sel = 0; expanded = null;
+  sel = 0; selPath = null; expanded = null;   // ⏎ must act on the TOP result
+  $("#q-clear").classList.toggle("show", !!$("#q").value);
   if (mode === "list") queueSearch();
   render();
+});
+$("#q-clear").addEventListener("click", () => {
+  $("#q").value = ""; $("#q-clear").classList.remove("show");
+  contentHits = []; sel = 0; selPath = null; render(); $("#q").focus();
 });
 $("#q").addEventListener("keydown", (e) => {  // ⌘A inside the field never bubbles as beep
   if ((e.metaKey || e.ctrlKey) && e.key === "a") e.stopPropagation();
