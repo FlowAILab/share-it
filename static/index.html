@@ -265,7 +265,9 @@ const nativeCmd = (cmd, files, extra) => {
   return true;
 };
 /* acknowledged pasteboard writes — the native side reports writeObjects()'s
-   real result, so a failed write toasts as a failure, never a success */
+   real result, so a failed write toasts as a failure, never a success.
+   Resolves: true = confirmed · false = confirmed FAILURE · null = no callback
+   (older shell) — callers treat null as unverified success, never failure. */
 let _pbAckId = 0;
 const _pbPending = {};
 window.__pbAck = (id, ok) => { const r = _pbPending[id]; delete _pbPending[id]; r?.(ok); };
@@ -274,11 +276,12 @@ function nativeCmdAck(cmd, files, extra) {
   const id = ++_pbAckId;
   const p = new Promise((res) => {
     _pbPending[id] = res;
-    setTimeout(() => { if (_pbPending[id]) { delete _pbPending[id]; res(true); } }, 1200);
+    setTimeout(() => { if (_pbPending[id]) { delete _pbPending[id]; res(null); } }, 1200);
   });
   nativePost({cmd, files, ack: id, ...(extra || {})});
   return p;
 }
+const ackFailed = (ok) => ok === false;   // null = unverified, not a failure
 // never alert(): modal dialogs freeze the panel (and automation). inline toast instead
 function toast(msg) {
   let el = $("#toast");
@@ -323,7 +326,7 @@ async function copyContext(s) {
     const d = await api("/api/copy_context", {path: s.path, deep: opts.deep});
     const ackP = nativeCmdAck("copyText", [], {text: d.text, localOnly: true});
     if (ackP) {
-      if (!(await ackP)) return toast("Clipboard write failed — try again");
+      if (ackFailed(await ackP)) return toast("Clipboard write failed — try again");
     } else {
       if (!(await copyText(d.text))) return;
     }
@@ -340,22 +343,23 @@ async function copyContext(s) {
 /* Send result — the human verb: last completed answer as rich text + the
    curated artifact files, one multi-item write. Text fields take the message,
    attachment-aware apps (Slack, Finder) take the files. */
-async function sendResult(s) {
+async function sendResult(s, textOnly) {
   try {
     const explicit = s._selTouched ? [...(s._sel || [])] : undefined;
     const d = await api("/api/result", {path: s.path,
       ...(explicit !== undefined ? {files: explicit} : {})});
-    const n = (d.files || []).length;
-    const ackP = nativeCmdAck("copyRich", d.files || [], {html: d.html, markdown: d.answer, images: []});
+    const n = textOnly ? 0 : (d.files || []).length;
+    const ackP = nativeCmdAck("copyRich", textOnly ? [] : (d.files || []),
+                              {html: d.html, markdown: d.answer, images: []});
     if (ackP) {
-      if (!(await ackP)) return toast("Clipboard write failed — try again");
-      let msg = n ? `Result + ${n} file${n > 1 ? "s" : ""} copied · chat apps attach the files`
-                  : "Result copied";
+      if (ackFailed(await ackP)) return toast("Clipboard write failed — try again");
+      let msg = n ? `Result + ${n} file${n > 1 ? "s" : ""} copied · apps take the message or the files (⌥⌘R: message only)`
+                  : "Result message copied";
       if (d.skipped?.length) msg += ` · ${d.skipped.length} missing skipped`;
       toast(msg);
     } else {
       await copyText(d.answer);
-      toast(n ? "Result copied (browser mode: message only — files via ⇧⌘C)" : "Result copied");
+      toast(n ? "Result copied (browser mode: message only — files via ⇧⌘C)" : "Result message copied");
     }
     flashCopied(s.path);
   } catch (e) { toast(e.message); }
@@ -405,6 +409,7 @@ function menuItemsFor(s) {
     {t: "Copy context", k: "⏎", run: () => copyContext(s)},
     {t: "Share link", k: "⌘L", run: () => doShare(s)},
     {t: "Send result", k: "⌘R", run: () => sendResult(s)},
+    {t: "Send result (message only)", k: "⌥⌘R", run: () => sendResult(s, true)},
   ];
   if (nf && nSelM)
     items.push({t: `Copy files (${payload})`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
@@ -428,9 +433,14 @@ function menuItemsFor(s) {
   return items;
 }
 
-function copyFilesOnly(s, fp) {
-  if (!nativeCmd("copyFiles", fp))
-    api("/api/file/copy", {path: s.path, files: fp}).catch((e) => toast(e.message));
+async function copyFilesOnly(s, fp) {
+  const ackP = nativeCmdAck("copyFiles", fp);
+  if (ackP) {
+    if (ackFailed(await ackP)) return toast("Clipboard write failed — try again");
+  } else {
+    try { await api("/api/file/copy", {path: s.path, files: fp}); }
+    catch (e) { return toast(e.message); }
+  }
   toast(`Copied ${fp.length} file${fp.length > 1 ? "s" : ""} — paste anywhere`);
 }
 
@@ -528,7 +538,8 @@ document.addEventListener("click", (ev) => {
 
 
 async function copyText(text) {
-  if (nativeCmd("copyText", [], {text})) return true;   // native never loses focus
+  const ackP = nativeCmdAck("copyText", [], {text});   // native never loses focus
+  if (ackP) return !ackFailed(await ackP);
   try { await navigator.clipboard.writeText(text); return true; }
   catch { toast("couldn't reach the clipboard — link is shown below"); return false; }
 }
@@ -1257,7 +1268,7 @@ document.addEventListener("keydown", (e) => {
     qlOpen = false;
     return;
   }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {  // ⌘K: actions
+  if (IS_NATIVE && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {  // ⌘K: actions
     e.preventDefault();
     if (mode === "shares") { openMenu(null, innerWidth / 2 - 115, 160); return; }
     const vis = visible();
@@ -1305,18 +1316,19 @@ document.addEventListener("keydown", (e) => {
     if (e.altKey) { if (s && openTargetFor(s)) doResume(s); }
     else copyContext(s);   // ⏎ = the primary verb: copy context
   }
-  else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "l"
-           && mode === "list") {
+  // ⌘L/⌘R/⌘D belong to browser chrome outside the native shell — never hijack
+  else if (IS_NATIVE && (e.metaKey || e.ctrlKey) && !e.shiftKey
+           && e.key.toLowerCase() === "l" && mode === "list") {
     e.preventDefault();
-    doShare(vis[sel]);     // ⌘L = share link (native shell only owns this combo)
+    doShare(vis[sel]);     // ⌘L = share link
   }
-  else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "r"
-           && mode === "list") {
+  else if (IS_NATIVE && (e.metaKey || e.ctrlKey) && !e.shiftKey
+           && e.key.toLowerCase() === "r" && mode === "list") {
     e.preventDefault();
-    if (vis[sel]) sendResult(vis[sel]);   // ⌘R = send result
+    if (vis[sel]) sendResult(vis[sel], e.altKey);   // ⌘R result · ⌥⌘R message only
   }
-  else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "d"
-           && mode === "list") {
+  else if (IS_NATIVE && (e.metaKey || e.ctrlKey) && !e.shiftKey
+           && e.key.toLowerCase() === "d" && mode === "list") {
     e.preventDefault();
     toggleDeep();          // ⌘D = deep toggle
   }

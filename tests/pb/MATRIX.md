@@ -3,15 +3,19 @@
 Payload: ONE write → item0 {public.html, public.rtf, plain} + one public.file-url item per artifact.
 Written with prepareForNewContents(.currentHostOnly).
 
-| Target | Takes | Evidence |
+| Target | Takes | Evidence class |
 |---|---|---|
-| Terminal / plain text fields | message (plain) | pbpaste + plain NSTextView probe — verified |
-| TextEdit / Notes / Mail compose (NSTextView) | rich message, 0 attachments inserted | headless NSTextView.paste() probe — verified |
-| Finder / Slack / attachment-aware apps | the files | empirically established (v1 copy-answer hijack bug: file items win) |
-| Browser textareas (Gmail/LinkedIn/X) | message (text/html flavor) | standard WebKit/Blink paste path — expected, spot-check on ship |
+| Terminal / plain text fields | message (plain) | VERIFIED — pbpaste + plain NSTextView probe |
+| TextEdit / Notes / Mail compose | rich message, 0 attachments inserted | MACHINERY-VERIFIED — headless NSTextView.paste(), the framework those apps embed |
+| Finder + readObjects(NSURL) consumers (Slack-class) | the files | API-VERIFIED (readObjects probe) + REPORTED (v1 copy-answer hijack bug in Slack) |
+| Browser textareas (Gmail/LinkedIn/X) | message (text/html flavor) | EXPECTED (standard engine paste path) — not yet exercised against the live products |
 
-Verdict: no destructive/empty combination in any tested target → gate PASSED,
-⌘R = multi-item (message + files). Toast wording: "observed in tested apps".
+Honest gate status: no destructive/empty combination in anything we could
+drive headlessly; the live Slack/Gmail/LinkedIn/X product surfaces were NOT
+automated (would require operating the user's real accounts). ⌘R ships
+multi-item per the product decision, with ⌥⌘R = message-only as the
+deterministic escape hatch, and the toast claims only "apps take the message
+or the files".
 
 ## E2E re-verification with real session payloads (v2 endpoints)
 

@@ -419,7 +419,8 @@ def _assemble_bundle(path, opts):
     messages = adapter.parse(path)
     files = _effective_files(session, opts) if opts.get("artifacts") else []
     # annotates messages' media names; resolves codex file-ref attachments too
-    media_objs, media_skipped = bundle.resolve_media(messages)
+    # (remote containment: refs only from the agents' own state dirs + temp)
+    media_objs, media_skipped = bundle.resolve_media(messages, remote=True)
     taken = {"manifest.json"} | {m["name"] for m in media_objs}
     index_name = "chat.html" if opts.get("fmt") == "html" else "chat.md"
     taken.add(index_name)
@@ -657,7 +658,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
             last_msg = next((m for m in reversed(messages)
                              if m["role"] == "assistant" and m["text"].strip()), None)
-            answer = last_msg["text"] if last_msg else ""
+            # legacy route: redaction is not optional here either
+            answer = render.redact(last_msg["text"]) if last_msg else ""
             blocks = re.findall(r"```[a-zA-Z]*\n(.*?)```", answer, re.S)
             # rich flavor + the files this answer explicitly names
             session = _session_entry(path)
@@ -801,7 +803,9 @@ class Handler(BaseHTTPRequestHandler):
             # ⏎/⌘C — the local agent-handoff verb. Builds an immutable on-disk
             # generation, then returns TEXT ONLY: full inline markdown when the
             # composed payload fits INLINE_LIMIT, else a handoff prompt + path.
-            path, deep = body.get("path", ""), bool(body.get("deep"))
+            path, deep = body.get("path", ""), body.get("deep", False)
+            if not isinstance(deep, bool):
+                return self._json({"error": "deep must be a boolean"}, 400)
             if not _allowed(path):
                 return self._json({"error": "invalid path"}, 400)
             try:
@@ -845,16 +849,16 @@ class Handler(BaseHTTPRequestHandler):
             answer = msg["text"]
             html = render.result_clipboard_html(answer)
             md = render.redact(answer)
+            if "files" in body and body.get("files") is None:
+                return self._json({"error": "files must be a list (omit for defaults)"}, 400)
             files_req = body.get("files")
             skipped = []
             if files_req is None:
                 arts = _session_artifacts(session)
-                try:
-                    _, last = _peek_texts(path, session["mtime"])
-                except Exception:
-                    last = ""
                 files = []
-                for p in _primary_paths(arts, last or answer[:4000]):
+                # defaults derive from the CHOSEN answer — attachments and
+                # message can never disagree about which turn they describe
+                for p in _primary_paths(arts, answer[:4000]):
                     (files if os.path.isfile(p) else skipped).append(p)
             else:
                 if not (isinstance(files_req, list)
@@ -1029,14 +1033,17 @@ def _completed_result(messages):
     last non-empty assistant message (best-effort, documented)."""
     last_user = -1
     for i, m in enumerate(messages):
-        if m["role"] == "user" and ((m.get("text") or "").strip() or m.get("media")):
+        if m["role"] == "user" and ((m.get("text") or "").strip()
+                                    or m.get("media") or m.get("media_refs")):
             last_user = i
     tail = [m for m in messages[last_user + 1:]
             if m["role"] == "assistant" and (m.get("text") or "").strip()]
     if not tail:
         return None
+    # metadata presence is judged SESSION-wide: if this client ever records a
+    # completion value, a metadata-less tail means in-flight, not "no metadata"
     has_meta = any(m.get("stop") is not None or m.get("phase") is not None
-                   for m in tail)
+                   for m in messages if m["role"] == "assistant")
     if not has_meta:
         return tail[-1]
     for m in reversed(tail):

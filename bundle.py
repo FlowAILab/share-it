@@ -104,18 +104,23 @@ def _tool_kind(name):
 
 
 def _tool_target(msg):
-    """Best-effort command/path for the structured header line."""
+    """Best-effort command/path for the structured header line. Redacted —
+    commands routinely inline tokens (curl -H 'Authorization: …')."""
     raw = msg.get("input") or ""
+    out = ""
     try:
         d = json.loads(raw)
         if isinstance(d, dict):
             for k in ("command", "file_path", "path", "notebook_path", "pattern", "query"):
                 v = d.get(k)
                 if isinstance(v, str) and v.strip():
-                    return " ".join(v.split())[:160]
+                    out = " ".join(v.split())[:160]
+                    break
     except (ValueError, TypeError):
         pass
-    return " ".join(raw.split())[:120]
+    if not out:
+        out = " ".join(raw.split())[:120]
+    return render.redact(out)
 
 
 def _tool_header(msg):
@@ -123,6 +128,24 @@ def _tool_header(msg):
     status = "" if ok is None else (" ✓" if ok else " ✗ FAILED")
     tgt = _tool_target(msg)
     return f"### Tool: {msg.get('name', '?')}{status}" + (f" — `{tgt}`" if tgt else "")
+
+
+def _edit_hunks(msg, per_side):
+    """Edit-style inputs render as an old/new hunk pair (spec §4)."""
+    try:
+        d = json.loads(msg.get("input") or "")
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    old = d.get("old_string") or d.get("old_str")
+    new = d.get("new_string") or d.get("new_str")
+    if not (isinstance(old, str) and isinstance(new, str)):
+        return None
+    fp = d.get("file_path") or d.get("path") or ""
+    old_t = truncate_middle_b(_clean(old), per_side)
+    new_t = truncate_middle_b(_clean(new), per_side)
+    return (f"{fp}\n--- old\n{old_t}\n+++ new\n{new_t}")
 
 
 # ---------------------------------------------------------------- transcript
@@ -202,9 +225,12 @@ def render_transcript(session, messages, deep=False, remote=False,
         bin_, bout = b
         head = _tool_header(m)
         parts = ["", head]
-        tin = _clean(m.get("input") or "")
+        hunks = (_edit_hunks(m, bin_ // 2) if _tool_kind(m.get("name")) == "edit"
+                 else None)
+        tin = hunks if hunks is not None else _clean(m.get("input") or "")
         if tin.strip():
-            parts += ["", render._fence(truncate_middle_b(tin, bin_))]
+            parts += ["", render._fence(truncate_middle_b(tin, bin_) if hunks is None
+                                        else tin)]
         tout = _clean(m.get("output") or "")
         if tout.strip():
             note = ""
@@ -226,44 +252,54 @@ def render_transcript(session, messages, deep=False, remote=False,
     for i, tier, kind in items:
         rendered[i] = render_item(i, kind, budget(i, kind))
 
-    # ---- global allocation: A, then A', then B newest-first, C newest-first
+    # ---- global allocation: A, then A', then B newest-first, C newest-first.
+    # HARD cap: header lines for ungranted items and the elision notice are
+    # charged too; when headers alone would flood a small cap, ungranted items
+    # collapse into the count-only notice instead.
     order = ([e for e in items if e[1] == 0]
              + [e for e in items if e[1] == 1]
              + sorted([e for e in items if e[1] == 2], key=lambda e: -e[0])
              + sorted([e for e in items if e[1] == 3], key=lambda e: -e[0]))
-    granted, used = set(), 0
-    for i, tier, kind in order:
-        sz = _b(rendered[i])
-        if used + sz <= global_cap:
-            granted.add(i)
-            used += sz
+    headers = {i: header_line(i, kind) for i, tier, kind in items}
+    NOTICE = 512
 
-    # Tier-A overflow: A' degrades to 4KiB, then final assistant turns to 8KiB;
-    # the initial and latest user request are the last things standing.
+    def allocate():
+        header_total = sum(_b(h) + 1 for h in headers.values())
+        collapse = header_total > max(global_cap // 2, 4096)
+        used = NOTICE + (0 if collapse else header_total)
+        granted = set()
+        for i, tier, kind in order:
+            delta = _b(rendered[i]) + 1 - (0 if collapse else _b(headers[i]) + 1)
+            if used + delta <= global_cap:
+                granted.add(i)
+                used += delta
+        return granted, collapse
+
+    granted, collapse = allocate()
+
+    # Tier-A overflow: A' degrades to 4KiB, then final assistant turns to 8KiB —
+    # order (not exemption) keeps the initial/latest requests standing longest.
     if not all(i in granted for i, t, k in items if t == 0):
-        granted, used = set(), 0
-        shrunk = {}
         for i, tier, kind in items:
             if tier == 1:
-                shrunk[i] = render_item(i, kind, 4 * 1024)
+                rendered[i] = render_item(i, kind, 4 * 1024)
             elif tier == 0 and kind == "assistant":
-                shrunk[i] = render_item(i, kind, 8 * 1024)
-        rendered.update(shrunk)
-        for i, tier, kind in order:
-            sz = _b(rendered[i])
-            if tier == 0 or used + sz <= global_cap:
-                if used + sz <= global_cap or kind == "user":
-                    granted.add(i)
-                    used += sz
+                rendered[i] = render_item(i, kind, 8 * 1024)
+        granted, collapse = allocate()
 
     elided = [e for e in items if e[0] not in granted]
-    parts, meta = [], {"elided": len(elided), "items": len(items)}
+    parts, meta = [], {"elided": len(elided), "items": len(items),
+                      "collapsed": collapse}
     for i, tier, kind in items:
-        parts.append(rendered[i] if i in granted else header_line(i, kind))
+        if i in granted:
+            parts.append(rendered[i])
+        elif not collapse:
+            parts.append(headers[i])
     body = "\n".join(parts) + "\n"
     if elided:
         n_tools = sum(1 for e in elided if e[2] == "tool")
-        body = (f"*[{len(elided)} earlier items shown as one-line headers to fit the "
+        style = "omitted" if collapse else "shown as one-line headers"
+        body = (f"*[{len(elided)} earlier items {style} to fit the "
                 f"size cap — {n_tools} tool calls among them]*\n" + body)
     if remote:
         # transcript bodies inevitably contain paths the agent typed; hosted
@@ -344,7 +380,9 @@ def header_md(session, messages, artifacts, reads, deep=False, remote=False,
             lines.append(f"- {path_of(f)}")
         lines.append("")
     lines += ["---", ""]
-    return "\n".join(lines)
+    # header fields (titles, crafted "paths", resume args) are transcript-derived
+    # too — the whole block passes redaction, same as bodies
+    return render.redact("\n".join(lines))
 
 
 # ---------------------------------------------------------------- media on disk
@@ -361,9 +399,27 @@ def _sniff(head):
     return None
 
 
-def resolve_media(messages):
+# where file-backed image refs may be read from. A crafted transcript must not
+# turn copy/share into an arbitrary-file exfil channel: remote (upload) mode is
+# limited to the agents' own state dirs + temp; local mode additionally allows
+# the user's home (their own pasted screenshots), never system paths.
+_REF_ROOTS_REMOTE = ("~/.codex", "~/.claude", "~/.shareit")
+_REF_ROOTS_LOCAL = ("~", "/tmp", "/private/tmp", "/private/var/folders")
+
+
+def _ref_allowed(real, remote):
+    roots = _REF_ROOTS_REMOTE if remote else _REF_ROOTS_LOCAL
+    tmpdir = os.environ.get("TMPDIR")
+    expanded = [os.path.realpath(os.path.expanduser(r)) for r in roots]
+    if tmpdir:
+        expanded.append(os.path.realpath(tmpdir))
+    return any(real == r or real.startswith(r + os.sep) for r in expanded)
+
+
+def resolve_media(messages, remote=False):
     """Inline base64 -> objects (via media.collect); file refs -> validated
-    bytes. Annotates entries with 'name'; returns (objects, skipped_count)."""
+    bytes behind root containment + magic sniff + size caps. Annotates entries
+    with 'name'; returns (objects, skipped_count)."""
     import media as _media
     objs = _media.collect(messages)
     skipped = 0
@@ -374,8 +430,9 @@ def resolve_media(messages):
             try:
                 real = os.path.realpath(p)
                 st = os.stat(real)
-                if not os.path.isfile(real) or st.st_size > IMG_MAX_BYTES or n >= IMG_MAX_COUNT:
-                    raise ValueError("cap")
+                if (not os.path.isfile(real) or not _ref_allowed(real, remote)
+                        or st.st_size > IMG_MAX_BYTES or n >= IMG_MAX_COUNT):
+                    raise ValueError("containment/cap")
                 with open(real, "rb") as fh:
                     data = fh.read()
                 mt = _sniff(data[:16])
@@ -407,10 +464,12 @@ def build(session, messages, deep=False, resume_cmd=None, artifacts=None,
     if os.path.islink(key_dir):
         raise OSError("refusing symlinked export target")
 
-    media_objs, skipped = resolve_media(messages)
-    body, meta = render_transcript(session, messages, deep=deep, remote=False)
+    media_objs, skipped = resolve_media(messages, remote=False)
     head = header_md(session, messages, artifacts or [], reads or [],
                      deep=deep, remote=False, resume_cmd=resume_cmd)
+    # the header spends part of the global budget — the body gets the rest
+    body, meta = render_transcript(session, messages, deep=deep, remote=False,
+                                   global_cap=max(GLOBAL_CAP - _b(head), 64 * 1024))
     doc = head + body
 
     gen = hashlib.sha1(os.urandom(16)).hexdigest()[:12]
@@ -476,7 +535,7 @@ def compose_clipboard(session, built, artifacts, inline_limit=INLINE_LIMIT):
         lines += art_lines
     lines += ["Read the transcript first, then continue where it left off.",
               "(Bundle is immutable and kept at least 7 days.)"]
-    return "pointer", "\n".join(lines) + "\n"
+    return "pointer", render.redact("\n".join(lines)) + "\n"
 
 
 # ---------------------------------------------------------------- GC

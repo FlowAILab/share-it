@@ -158,6 +158,44 @@ bm, _ = bundle.render_transcript(SESSION, msgs_m)
 ck("[image unavailable] marker for skipped refs", bm.count("[image unavailable]") == 2, bm)
 ck("resolved image gets a media link", "![pasted image]" in bm)
 
+# ---- hard cap: final body NEVER exceeds global_cap --------------------------
+for cap in (1024, 8_192, 40_000):
+    hb, hm = bundle.render_transcript(SESSION, manym, deep=False, global_cap=cap)
+    ck(f"hard cap holds at {cap}", len(hb.encode()) <= cap,
+       f"body={len(hb.encode())}B > cap={cap}")
+
+# ---- tool-header redaction (secrets in commands) ----------------------------
+hdr_msgs = [{"role": "user", "text": "t"},
+            {"role": "tool", "name": "Bash",
+             "input": '{"command": "curl -H \'Authorization: Bearer sk-aaaaaaaaaaaaaaaaaaaaaaaaa\' api.x.com"}',
+             "output": "ok", "ok": True}]
+hb2, _ = bundle.render_transcript(SESSION, hdr_msgs)
+ck("tool header redacts inline secrets", "sk-aaaa" not in hb2 and "REDACTED" in hb2)
+
+# ---- Edit tool renders old/new hunks ----------------------------------------
+em = [{"role": "user", "text": "t"},
+      {"role": "tool", "name": "Edit",
+       "input": '{"file_path": "/proj/x.py", "old_string": "OLDCODE line", "new_string": "NEWCODE line"}',
+       "output": "done", "ok": True}]
+eb, _ = bundle.render_transcript(SESSION, em)
+ck("edit renders old/new hunks", "--- old" in eb and "+++ new" in eb
+   and "OLDCODE" in eb and "NEWCODE" in eb)
+
+# ---- media-ref containment: system paths refused even when they're images ---
+import shutil as _sh
+sys_img = "/tmp/shareit-test-root.png"       # /tmp allowed locally, NOT remotely
+_sh.copy(png, sys_img)
+m_loc = [{"role": "user", "text": "x", "media_refs": [{"path": sys_img}]}]
+o1, s1 = bundle.resolve_media([dict(m) for m in m_loc], remote=False)
+m_rem = [{"role": "user", "text": "x", "media_refs": [{"path": sys_img}]}]
+o2, s2 = bundle.resolve_media([dict(m) for m in m_rem], remote=True)
+ck("local mode allows /tmp image ref", s1 == 0 and len(o1) == 1, (s1, len(o1)))
+ck("remote mode refuses non-agent-dir ref", s2 == 1 and len(o2) == 0, (s2, len(o2)))
+etc_ref = [{"role": "user", "text": "x", "media_refs": [{"path": "/etc/hosts"}]}]
+o3, s3 = bundle.resolve_media(etc_ref, remote=False)
+ck("system path refused everywhere", s3 == 1 and not o3)
+os.remove(sys_img)
+
 # ---- GC: lease + tmp cleanup ------------------------------------------------
 old_gen = os.path.join(bundle.EXPORT_ROOT, "claude-deadbeef0000", "aaaa11112222")
 os.makedirs(old_gen)
@@ -203,6 +241,16 @@ ck("metadata-less client → last assistant best-effort",
        {"role": "assistant", "text": "B"}])["text"] == "B")
 ck("no assistant after last user → None",
    cr([{"role": "assistant", "text": "old"}, {"role": "user", "text": "q"}]) is None)
+ck("media_refs-only user message counts as latest request",
+   cr([{"role": "user", "text": "q"},
+       {"role": "assistant", "text": "A1", "phase": "final_answer"},
+       {"role": "user", "text": "", "media_refs": [{"path": "/x.png"}]},
+       {"role": "assistant", "text": "hmm", "phase": "commentary"}]) is None)
+ck("null-metadata tail with metadata elsewhere → incomplete (None)",
+   cr([{"role": "user", "text": "q1"},
+       {"role": "assistant", "text": "done", "stop": "end_turn"},
+       {"role": "user", "text": "q2"},
+       {"role": "assistant", "text": "streaming...", "stop": None}]) is None)
 
 # ---- result renderer safety -------------------------------------------------
 hostile = ('# Title\n<script>alert(1)</script>\n[x](javascript:alert(1))\n'

@@ -285,11 +285,25 @@ def parse_codex(path):
             tool = tools_by_call.get(payload.get("call_id"))
             if tool is not None:
                 out = payload.get("output")
+                ok = None   # best-effort success signal for budget boosts
+                if isinstance(out, dict):
+                    meta = out.get("metadata") or {}
+                    if isinstance(meta.get("exit_code"), int):
+                        ok = meta["exit_code"] == 0
+                    elif isinstance(out.get("success"), bool):
+                        ok = out["success"]
                 if isinstance(out, list):
                     out = _content_text(out)
                 elif isinstance(out, dict):
                     out = out.get("output") or json.dumps(out)
-                tool["output"] = out if isinstance(out, str) else str(out)
+                out_s = out if isinstance(out, str) else str(out)
+                if ok is None:   # shell outputs often lead with "Exit code: N"
+                    m = re.match(r"\s*[Ee]xit code:?\s*(-?\d+)", out_s[:60])
+                    if m:
+                        ok = m.group(1) == "0"
+                tool["output"] = out_s
+                if ok is not None:
+                    tool["ok"] = ok
         elif pt and pt.endswith("_call"):  # web_search_call, image_generation_call, …
             action = payload.get("action") or {}
             messages.append({"role": "tool", "name": pt.replace("_call", ""),
