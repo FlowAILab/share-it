@@ -387,7 +387,7 @@ function menuItemsFor(s) {
     const sh = visibleShares()[sel];
     if (!sh) return [];
     const items = [
-      {t: "Copy Link", k: "⌘C", run: () => { copyText(sh.url); toast("Copied link"); }},
+      {t: "Copy Link", k: "⌘C", run: async () => { if (await copyText(sh.url)) toast("Copied link"); }},
       {t: "Open", run: () => api("/api/open_url", {url: sh.url}).catch((e) => toast(e.message))},
     ];
     if (sh.provider === "hosted")
@@ -770,7 +770,7 @@ $("#list").addEventListener("click", (ev) => {
   const t = ev.target;
   const rowBtn = t.closest(".rowshare");
   if (rowBtn) {
-    if (rowBtn.dataset.copy) { copyText(rowBtn.dataset.copy); flashCopied(s.path); }
+    if (rowBtn.dataset.copy) { copyText(rowBtn.dataset.copy).then((ok) => ok && flashCopied(s.path)); }
     else copyContext(s);   // row button = the primary verb, same as ⏎
     return;
   }
@@ -811,12 +811,7 @@ $("#list").addEventListener("click", (ev) => {
   }
   if (t.closest("#art-go")) return void shareSelectedArtifacts(s);
   if (t.closest("#art-copy")) {
-    const files = [...s._sel];
-    if (nativeCmd("copyFiles", files))
-      toast(`${files.length} file${files.length > 1 ? "s" : ""} on the clipboard — paste anywhere`);
-    else api("/api/file/copy", {path: s.path, files})
-      .then((d) => toast(`${d.count} file${d.count > 1 ? "s" : ""} on the clipboard — paste anywhere`))
-      .catch((err) => toast(err.message));
+    copyFilesOnly(s, [...s._sel]);
     return;
   }
   if (t.closest("#resume")) return void doResume(s);
@@ -827,9 +822,12 @@ $("#list").addEventListener("click", (ev) => {
   if (openBtn) { api("/api/open_url", {url: openBtn.dataset.open}).catch((e) => toast(e.message)); return; }
   const copyBtn = t.closest("[data-copy]");
   if (copyBtn) {
-    copyText(copyBtn.dataset.copy); flashCopied(s.path);
-    const n = s._share?.n_files;
-    toast(`Link copied${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
+    copyText(copyBtn.dataset.copy).then((ok) => {
+      if (!ok) return toast("Clipboard write failed — try again");
+      flashCopied(s.path);
+      const n = s._share?.n_files;
+      toast(`Link copied${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
+    });
     return;
   }
   if (t.closest(".row-line")) { sel = +t.closest(".row").dataset.i; selPath = s.path; toggle(s); }
@@ -1046,8 +1044,9 @@ async function shareSelectedArtifacts(s) {
   const lines = files.filter((f, i) => results[i])
     .map((f, _, arr) => arr.length > 1 ? `${f.split("/").pop()}: ${s._art[f].url}` : s._art[f].url);
   if (lines.length) {
-    copyText(lines.join("\n"));
-    toast(`Link${lines.length > 1 ? "s" : ""} copied · ${lines.length} file${lines.length > 1 ? "s" : ""}`);
+    if (await copyText(lines.join("\n")))
+      toast(`Link${lines.length > 1 ? "s" : ""} copied · ${lines.length} file${lines.length > 1 ? "s" : ""}`);
+    else return toast("Clipboard write failed — try again");
     files.forEach((f) => flashCopied(f));
     s._sel.clear();
     s._share = null;  // session-link file set changed with the selection
@@ -1059,13 +1058,13 @@ async function doShareArtifact(s, file) {
   s._art = s._art || {};
   const st = s._art[file];
   if (st === "busy") return;
-  if (st && st.url) { copyText(st.url); flashCopied(file); return; }
+  if (st && st.url) { copyText(st.url).then((ok) => ok && flashCopied(file)); return; }
   s._art[file] = "busy"; render();
   try {
     const d = await api("/api/share/artifact", {path: s.path, file, expires_hours: opts.expiry});
     s._art[file] = {url: d.url, provider: d.provider, expires: d.expires};
-    copyText(d.url);
-    flashCopied(file);
+    if (await copyText(d.url)) flashCopied(file);
+    else toast("Clipboard write failed — try again");
     return;
   } catch (e) { s._art[file] = null; toast(e.message); }
   render();
@@ -1076,7 +1075,8 @@ async function doShare(s, modeOverride) {
   const wantMode = modeOverride || (opts.deep ? "deep" : "agent");
   // #9: a cached link is only reusable if it was built for THIS mode + files
   if (s._share?.url && !modeOverride && s._share.mode === wantMode && !s._selTouched) {
-    copyText(s._share.url);
+    if (!(await copyText(s._share.url)))
+      return toast("Clipboard write failed — try again");
     const n = s._share.n_files;
     toast(`Link copied${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
     return;
@@ -1092,7 +1092,7 @@ async function doShare(s, modeOverride) {
     if (gen !== optsGen) { s._share = null; render(); return; }  // options changed mid-flight
     s._share = {url: d.url, provider: d.provider, expires: d.expires,
                 n_files: d.n_files || 0, mode: wantMode, fresh: true};
-    copyText(d.url);
+    if (!(await copyText(d.url))) { s._share.fresh = true; render(); return toast("Link created — clipboard write failed, copy it from the row"); }
     const bits = [`Link copied`];
     if (d.n_files) bits.push(`${d.n_files} file${d.n_files > 1 ? "s" : ""}`);
     if (d.images_skipped) bits.push(`${d.images_skipped} image${d.images_skipped > 1 ? "s" : ""} unavailable`);
@@ -1184,7 +1184,7 @@ async function sharesClick(ev) {
   if (ob) { api("/api/open_url", {url: ob.dataset.openlink}).catch((e) => toast(e.message)); return; }
   const copyBtn = ev.target.closest("[data-copy]");
   if (copyBtn) {
-    copyText(copyBtn.dataset.copy); copyBtn.textContent = "✓";
+    copyText(copyBtn.dataset.copy).then((ok) => { if (ok) copyBtn.textContent = "✓"; });
     setTimeout(() => { copyBtn.textContent = "copy"; }, 900);
     return;
   }
@@ -1291,7 +1291,7 @@ document.addEventListener("keydown", (e) => {
              && !window.getSelection()?.toString())) {
       e.preventDefault();
       const s = live[sel];
-      if (s) { copyText(s.url); toast("Copied link"); }
+      if (s) copyText(s.url).then((ok) => ok && toast("Copied link"));
     } else if (e.key === "Escape") {
       e.preventDefault();
       if ($("#q").value) { $("#q").value = ""; render(); }

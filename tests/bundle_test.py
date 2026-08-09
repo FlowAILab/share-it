@@ -251,6 +251,12 @@ ck("null-metadata tail with metadata elsewhere → incomplete (None)",
        {"role": "assistant", "text": "done", "stop": "end_turn"},
        {"role": "user", "text": "q2"},
        {"role": "assistant", "text": "streaming...", "stop": None}]) is None)
+ck("FIRST-turn claude interruption (only stop:null) → None",
+   cr([{"role": "user", "text": "q"},
+       {"role": "assistant", "text": "partial explanation", "stop": None}]) is None)
+ck("old codex without phase field anywhere → fallback works",
+   cr([{"role": "user", "text": "q"},
+       {"role": "assistant", "text": "OLD-FMT-ANSWER"}])["text"] == "OLD-FMT-ANSWER")
 
 # ---- result renderer safety -------------------------------------------------
 hostile = ('# Title\n<script>alert(1)</script>\n[x](javascript:alert(1))\n'

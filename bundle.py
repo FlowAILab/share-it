@@ -114,13 +114,14 @@ def _tool_target(msg):
             for k in ("command", "file_path", "path", "notebook_path", "pattern", "query"):
                 v = d.get(k)
                 if isinstance(v, str) and v.strip():
-                    out = " ".join(v.split())[:160]
+                    out = " ".join(v.split())
                     break
     except (ValueError, TypeError):
         pass
     if not out:
-        out = " ".join(raw.split())[:120]
-    return render.redact(out)
+        out = " ".join(raw.split())
+    # redact BEFORE slicing — a token crossing the cut must not half-survive
+    return render.redact(out)[:160]
 
 
 def _tool_header(msg):
@@ -142,7 +143,7 @@ def _edit_hunks(msg, per_side):
     new = d.get("new_string") or d.get("new_str")
     if not (isinstance(old, str) and isinstance(new, str)):
         return None
-    fp = d.get("file_path") or d.get("path") or ""
+    fp = _clean(d.get("file_path") or d.get("path") or "", strip_b64=False)
     old_t = truncate_middle_b(_clean(old), per_side)
     new_t = truncate_middle_b(_clean(new), per_side)
     return (f"{fp}\n--- old\n{old_t}\n+++ new\n{new_t}")
@@ -225,8 +226,8 @@ def render_transcript(session, messages, deep=False, remote=False,
         bin_, bout = b
         head = _tool_header(m)
         parts = ["", head]
-        hunks = (_edit_hunks(m, bin_ // 2) if _tool_kind(m.get("name")) == "edit"
-                 else None)
+        hunks = (_edit_hunks(m, (512 * 1024 if deep else bin_ // 2))
+                 if _tool_kind(m.get("name")) == "edit" else None)
         tin = hunks if hunks is not None else _clean(m.get("input") or "")
         if tin.strip():
             parts += ["", render._fence(truncate_middle_b(tin, bin_) if hunks is None
@@ -265,7 +266,7 @@ def render_transcript(session, messages, deep=False, remote=False,
 
     def allocate():
         header_total = sum(_b(h) + 1 for h in headers.values())
-        collapse = header_total > max(global_cap // 2, 4096)
+        collapse = header_total > global_cap // 2   # no floor — cap is king
         used = NOTICE + (0 if collapse else header_total)
         granted = set()
         for i, tier, kind in order:
@@ -388,22 +389,25 @@ def header_md(session, messages, artifacts, reads, deep=False, remote=False,
 # ---------------------------------------------------------------- media on disk
 
 _MAGIC = {b"\x89PNG\r\n\x1a\n": "image/png", b"\xff\xd8\xff": "image/jpeg",
-          b"GIF87a": "image/gif", b"GIF89a": "image/gif",
-          b"RIFF": "image/webp"}
+          b"GIF87a": "image/gif", b"GIF89a": "image/gif"}
 
 
 def _sniff(head):
     for magic, mt in _MAGIC.items():
         if head.startswith(magic):
             return mt
+    # RIFF alone is any RIFF container (wav/avi…) — require the WEBP fourcc
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
     return None
 
 
 # where file-backed image refs may be read from. A crafted transcript must not
 # turn copy/share into an arbitrary-file exfil channel: remote (upload) mode is
-# limited to the agents' own state dirs + temp; local mode additionally allows
-# the user's home (their own pasted screenshots), never system paths.
-_REF_ROOTS_REMOTE = ("~/.codex", "~/.claude", "~/.shareit")
+# limited to the agents' own attachment/cache dirs + temp (NOT ~/.shareit — a
+# bundle store must never feed other sessions' screenshots into an upload);
+# local mode additionally allows the user's home, never system paths.
+_REF_ROOTS_REMOTE = ("~/.codex", "~/.claude")
 _REF_ROOTS_LOCAL = ("~", "/tmp", "/private/tmp", "/private/var/folders")
 
 
@@ -469,7 +473,7 @@ def build(session, messages, deep=False, resume_cmd=None, artifacts=None,
                      deep=deep, remote=False, resume_cmd=resume_cmd)
     # the header spends part of the global budget — the body gets the rest
     body, meta = render_transcript(session, messages, deep=deep, remote=False,
-                                   global_cap=max(GLOBAL_CAP - _b(head), 64 * 1024))
+                                   global_cap=max(GLOBAL_CAP - _b(head), 0))
     doc = head + body
 
     gen = hashlib.sha1(os.urandom(16)).hexdigest()[:12]

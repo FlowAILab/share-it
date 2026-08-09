@@ -475,10 +475,16 @@ def _render_index(session, messages, opts, artifact_links, stats, reads, media_b
             media_base=media_base)
     # v2 markdown shares use the SAME renderer as local bundles, in remote mode:
     # tiered budgets, structured tool headers, scrubbed header (no resume cmd,
-    # basename cwd, no absolute paths), hosted-URL media links.
+    # basename cwd, no absolute paths), hosted-URL media links. The header and
+    # the media-URL expansion are charged against the same global cap.
     head = bundle.header_md(session, messages, links, reads, deep=deep,
                             remote=True, resume_cmd=None, expiry_label=expiry_label)
-    body, _meta = bundle.render_transcript(session, messages, deep=deep, remote=True)
+    n_media = sum(1 for m in messages for _ in (m.get("media") or [])) \
+        + sum(1 for m in messages for _ in (m.get("media_refs") or []))
+    url_growth = n_media * (len(media_base or "media") + 8)
+    body, _meta = bundle.render_transcript(
+        session, messages, deep=deep, remote=True,
+        global_cap=max(bundle.GLOBAL_CAP - len(head.encode()) - url_growth, 0))
     return (head + body).replace(bundle._MEDIA_TOKEN, media_base or "media")
 
 
@@ -1040,9 +1046,11 @@ def _completed_result(messages):
             if m["role"] == "assistant" and (m.get("text") or "").strip()]
     if not tail:
         return None
-    # metadata presence is judged SESSION-wide: if this client ever records a
-    # completion value, a metadata-less tail means in-flight, not "no metadata"
-    has_meta = any(m.get("stop") is not None or m.get("phase") is not None
+    # metadata presence = the parser set the FIELD (only done when the client's
+    # format records completion). A null value then means genuinely in-flight —
+    # a first-turn interruption with stop:null must 409, while clients that
+    # never record completion fall back to the last answer.
+    has_meta = any(("stop" in m) or ("phase" in m)
                    for m in messages if m["role"] == "assistant")
     if not has_meta:
         return tail[-1]

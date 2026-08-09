@@ -192,16 +192,21 @@ def parse_claude(path):
                         tool["output"] = rc if isinstance(rc, str) else json.dumps(rc)
                         tool["ok"] = not block.get("is_error", False)
         else:  # assistant
-            stop = (obj.get("message") or {}).get("stop_reason")
+            msg_obj = obj.get("message") or {}
+            has_stop = "stop_reason" in msg_obj   # field present = format records it
             for block in content or []:
                 bt = block.get("type")
                 if bt == "thinking":
                     messages.append({"role": "thinking", "text": block.get("thinking", "")})
                 elif bt == "text":
                     # stop_reason rides along so "Send result" can tell a
-                    # completed end_turn reply from an interrupted tool run
-                    messages.append({"role": "assistant", "text": block.get("text", ""),
-                                     "stop": stop})
+                    # completed end_turn reply from an interrupted tool run.
+                    # The key is set ONLY when the record carries the field —
+                    # then a null value genuinely means "still in flight".
+                    am = {"role": "assistant", "text": block.get("text", "")}
+                    if has_stop:
+                        am["stop"] = msg_obj.get("stop_reason")
+                    messages.append(am)
                 elif bt == "tool_use":
                     tool = {"role": "tool", "name": block.get("name", "?"),
                             "input": json.dumps(block.get("input", {}), indent=None)[:100000],
@@ -264,13 +269,17 @@ def parse_codex(path):
                     messages.append(msg)
                     saw_user = True
             elif role == "assistant" and text.strip():
-                messages.append({"role": "assistant", "text": text,
-                                 "phase": payload.get("phase")})
+                am = {"role": "assistant", "text": text}
+                if "phase" in payload:   # key only when the format records it
+                    am["phase"] = payload.get("phase")
+                messages.append(am)
         elif pt == "agent_message":
             text = _content_text(payload.get("content")) or payload.get("message", "")
             if text.strip():
-                messages.append({"role": "assistant", "text": text,
-                                 "phase": payload.get("phase")})
+                am = {"role": "assistant", "text": text}
+                if "phase" in payload:
+                    am["phase"] = payload.get("phase")
+                messages.append(am)
         elif pt == "reasoning":
             summary = "\n".join(s.get("text", "") for s in payload.get("summary") or [])
             if summary.strip():
@@ -297,8 +306,12 @@ def parse_codex(path):
                 elif isinstance(out, dict):
                     out = out.get("output") or json.dumps(out)
                 out_s = out if isinstance(out, str) else str(out)
-                if ok is None:   # shell outputs often lead with "Exit code: N"
-                    m = re.match(r"\s*[Ee]xit code:?\s*(-?\d+)", out_s[:60])
+                if ok is None:
+                    # dominant real formats: "Exit code: N" prefix, and
+                    # "Process exited with code N" after chunk metadata
+                    m = (re.match(r"\s*[Ee]xit code:?\s*(-?\d+)", out_s[:60])
+                         or re.search(r"Process exited with code (-?\d+)",
+                                      out_s[:200_000]))
                     if m:
                         ok = m.group(1) == "0"
                 tool["output"] = out_s
