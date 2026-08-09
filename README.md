@@ -32,25 +32,38 @@ teammate, or hand it to another agent to continue the work.
 1. [Download the DMG](https://github.com/FlowAILab/share-it/releases/latest/download/Share-It.dmg) and drag **Share-It** into **Applications**.
 2. Open it once (right-click → Open the first time — not yet notarized).
 3. Press **⌥S** (Option + S). That's the whole app: **⌥S** opens the palette over
-   whatever you're doing, type to find a session, **⏎** to get the link.
+   whatever you're doing, type to find a session, **⏎** to copy its context for another
+   agent — or **⌘L** for a link, **⌘R** to send the result to a person.
 
-## Core
+## Three things to do with a session
 
-- 🔗 **Share a link** — hit **⏎**, a short URL lands on your clipboard: a clean reader page
-  for a teammate, or a handoff for another agent. Pasted screenshots come along.
-- 📋 **Copy the chat** — hit **⌘C**, it pastes formatted into Slack or Mail, and as clean
-  markdown into your editor. Stays on your machine.
-- 📦 **Grab the files** — hit **⇧⌘C**, the PDFs, images, and code the agent made drop
+- 🧠 **Copy context** — hit **⏎**, and the whole session — every prompt, response, and
+  **tool call with its output** — lands on your clipboard, ready to paste into another
+  agent on your Mac. Small sessions paste inline; big ones save to an immutable bundle
+  and copy a short handoff prompt + its path, so a huge transcript never floods the next
+  agent's context. Pasted screenshots come too, referenced so an image-capable agent can
+  actually look at them. This is what Claude's own `/export` can't do — that ships the
+  rendered scrollback (no tool output, images as `[Image #N]` with no path); Share-It
+  reads the raw session, so the receiving agent gets the real work.
+- 🔗 **Share link** — hit **⌘L**, a short URL lands on your clipboard: the same full
+  context as a hosted page, for an agent on another device. Paths are stripped to
+  basenames, your username never leaves your Mac.
+- 📣 **Send result** — hit **⌘R**, and the session's final answer becomes a clean message
+  plus the files it produced, in one copy. Paste into a text field and you get the
+  message; paste into Slack, Mail, or Finder and you get the files. (**⌥⌘R** copies just
+  the message.) For sharing a finished result with a person.
+- 📦 **Copy files** — **⇧⌘C** drops just the PDFs, images, and code the agent made
   straight into Finder, Slack, or email. Real files, not screenshots.
 
 ## Nice extras
 
-- 🧠 **Deep mode** — the reasoning, full tool output, and the files it created or changed,
-  plus a manifest of everything it read, so another agent can pick up the thread.
+- 🧠 **Deep mode** — **⌘D** adds reasoning and full, untruncated tool output to Copy
+  context and Share link, for a maximally faithful handoff.
 - ↩︎ **Open where you left off** — one key reopens the session right in Claude Code or Codex.
 - 🛟 **Nothing gets lost** — Claude wipes old sessions after ~30 days; Share-It quietly
   keeps them, and lets you search everything you've ever done.
-- ⏳ **Your rules** — links last forever or 1 / 3 / 7 days, and vanish in one click.
+- ⏳ **Your rules** — share links last forever or 1 / 3 / 7 days (set it in the **⌘K**
+  menu), and vanish in one click.
 
 ## Works with
 
@@ -74,10 +87,13 @@ New client? It's one small file in [`adapters.py`](adapters.py) — PRs welcome.
 
 ## 🔒 Yours, always
 
-Nothing leaves your Mac until you hit share. Your sessions are **never used for training** —
-they're yours, on your own storage. The transcript text is scrubbed for common secret
-patterns before it's shared; the files you attach ship as-is, so glance at what's selected
-before sending. Links are public but unguessable, and expire on your schedule (or never).
+Nothing leaves your Mac until you hit **Share link** — **Copy context** and **Send
+result** stay entirely local (and Copy context is marked host-only, so it doesn't ride
+Universal Clipboard to your other devices). Your sessions are **never used for training** —
+they're yours, on your own storage. Transcript text is always scrubbed for common secret
+patterns; hosted links additionally strip absolute paths and your username. The files you
+attach ship as-is, so glance at what's selected before sending. Links are public but
+unguessable, and expire on your schedule (or never).
 
 ## Build from source
 

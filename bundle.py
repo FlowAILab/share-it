@@ -113,11 +113,22 @@ def _tool_target(msg):
         if isinstance(d, dict):
             for k in ("command", "file_path", "path", "notebook_path", "pattern", "query"):
                 v = d.get(k)
+                if isinstance(v, list):        # codex shell: ["bash","-lc","…"]
+                    v = v[-1] if v else ""
                 if isinstance(v, str) and v.strip():
                     out = " ".join(v.split())
                     break
     except (ValueError, TypeError):
         pass
+    if not out:
+        # codex desktop 'exec' wraps the real command in a JS harness call —
+        # pull the inner cmd: "…" so the header shows the command, not the JS
+        m = re.search(r'\bcmd:\s*"((?:[^"\\]|\\.)*)"', raw)
+        if m:
+            try:
+                out = " ".join(json.loads(f'"{m.group(1)}"').split())
+            except ValueError:
+                out = " ".join(m.group(1).split())
     if not out:
         out = " ".join(raw.split())
     # redact BEFORE slicing — a token crossing the cut must not half-survive
