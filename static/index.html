@@ -112,6 +112,9 @@ body.browser #panel {
   font-variant-numeric: tabular-nums; display: inline-flex; gap: 8px; align-items: baseline; }
 .row .m .proj { color: rgba(255,255,255,0.40); }
 .row .m .when { min-width: 30px; text-align: right; color: rgba(255,255,255,0.52); }
+.recent-tag { font: 500 9.5px ui-monospace, Menlo, monospace; letter-spacing: 0.06em;
+  text-transform: uppercase; color: rgba(255,255,255,0.35);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 5px; padding: 1px 5px; }
 .row .clip { flex: none; display: inline-flex; align-items: center; gap: 2px;
              font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .row .clip svg { width: 11px; height: 11px; }
@@ -120,8 +123,9 @@ body.browser #panel {
 .empty .esc-hint { margin-top: 10px; font-size: 12px; color: var(--faint); }
 
 /* expansion */
-.card { margin: 2px 6px 8px 34px; padding: 10px 12px; border-left: 1px solid var(--hair);
-        display: flex; flex-direction: column; gap: 10px; }
+.card { margin: 2px 8px 8px 34px; padding: 10px 12px 12px; border-radius: 12px;
+        background: rgba(255,255,255,0.035);
+        display: flex; flex-direction: column; gap: 9px; }
 .peek { display: flex; flex-direction: column; gap: 5px; font-size: 13px; line-height: 1.5; }
 .peek .msg { display: flex; gap: 8px; align-items: baseline; }
 .peek .msg.u i { color: var(--faint); }
@@ -198,8 +202,7 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .paysum { font-size: 11px; color: var(--faint); padding: 2px 0 0; }
 .mhdr { font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
   color: var(--faint); padding: 7px 12px 3px; }
-.peekbox { border: 1px solid var(--hair); background: rgba(255,255,255,0.025);
-  border-radius: 10px; padding: 8px 10px 9px; }
+.peekbox { background: rgba(0,0,0,0.22); border-radius: 10px; padding: 8px 10px 9px; }
 .chathdr { display: flex; align-items: center; justify-content: space-between;
   font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
   color: var(--faint); margin-bottom: 6px; }
@@ -218,6 +221,10 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
   background: rgba(255,255,255,0.12); font-weight: 600; }
 .actbtn.primary:hover { background: rgba(255,255,255,0.18); }
 .actbtn .dimlbl { color: var(--faint); font-size: 10.5px; }
+.openin-wrap { display: inline-flex; gap: 1px; }
+.openin-wrap .actbtn { border-radius: 8px 0 0 8px; }
+.openin-wrap .caret { border-radius: 0 8px 8px 0; padding: 4px 7px; }
+.openin-wrap .actbtn:only-child { border-radius: 8px; }
 .actbar { flex-wrap: wrap; }
 .chip-deep { font: 600 10px ui-monospace, Menlo, monospace; color: #e8b34c;
   border: 1px solid rgba(232,179,76,0.45); border-radius: 6px; padding: 2px 7px;
@@ -749,6 +756,18 @@ function queueSearch() {
   }, 180);
 }
 
+let _navTs = 0;   // last keyboard-nav moment — hover yields to the keyboard
+function moveSel() {
+  const list = $("#list");
+  list.querySelectorAll(".row.sel").forEach((r) => {
+    r.classList.remove("sel"); r.setAttribute("aria-selected", "false");
+  });
+  const row = list.querySelector(`.row[data-i="${sel}"]`);
+  if (row) {
+    row.classList.add("sel"); row.setAttribute("aria-selected", "true");
+    row.scrollIntoView({block: "nearest"});
+  }
+}
 function render() {
   mode === "list" ? renderList() : renderShares();
 }
@@ -774,7 +793,16 @@ function renderOpts() {
 let lastCopied = null;
 let qlOpen = false;
 window.__qlClosed = () => { qlOpen = false; };
+const RECENTS_KEY = "shareit-recent-acts";
+function noteRecent(path) {
+  try {
+    const r = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]").filter((p) => p !== path);
+    r.unshift(path);
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(r.slice(0, 6)));
+  } catch {}
+}
 function flashCopied(key) {
+  noteRecent(key);
   lastCopied = key;
   setTimeout(() => { if (lastCopied === key) { lastCopied = null; render(); } }, 2400);
   render();
@@ -799,7 +827,7 @@ function accessoryHtml(s) {
 }
 
 function renderList() {
-  const vis = visible();
+  let vis = visible();
   const query = $("#q").value.trim();
   if (selPath) {
     const i = vis.findIndex((s) => s.path === selPath);
@@ -808,6 +836,18 @@ function renderList() {
   if (sel >= vis.length) sel = Math.max(0, vis.length - 1);
   selPath = vis[sel]?.path || null;
   const list = $("#list");
+  const keepScroll = list.scrollTop;   // innerHTML reset must not jump the view
+  let recentPaths = [];
+  if (!query && srcFilter === "all") {
+    try { recentPaths = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]"); } catch {}
+    const byPath = new Map(vis.map((x) => [x.path, x]));
+    const recents = recentPaths.map((p) => byPath.get(p)).filter(Boolean).slice(0, 2);
+    if (recents.length) {   // pin recents on top, keep the rest in time order
+      const rp = new Set(recents.map((x) => x.path));
+      vis = recents.concat(vis.filter((x) => !rp.has(x.path)));
+    }
+  }
+  const recentSet = new Set(recentPaths.slice(0, 2));
   list.innerHTML = vis.length ? vis.map((s, i) => `
     <div class="row${i === sel ? " sel" : ""}" role="option" aria-selected="${i === sel}" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
       <div class="row-line">
@@ -817,6 +857,7 @@ function renderList() {
         <span class="t">${hiText(s.title)}${s._snippet && $("#q").value.trim().length >= 2
           ? `<span class="snip">${esc(s._snippet).replace(/«/g, "<b>").replace(/»/g, "</b>")}</span>` : ""}</span>
         <span class="m">
+          ${!query && srcFilter === "all" && recentSet.has(s.path) && i < 2 ? '<span class="recent-tag">recent</span>' : ""}
           ${(s.n_primary ?? s.arts) ? `<span class="clip" data-tip="${s.n_primary ?? s.arts} deliverable${(s.n_primary ?? s.arts) > 1 ? "s" : ""} · ${s.arts} file${s.arts > 1 ? "s" : ""} total"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.n_primary ?? s.arts}</span>` : ""}
           <span class="proj">${esc(s.project || "")}</span><span class="when">${rel(s.last_used || s.mtime)}</span>
         </span>
@@ -854,6 +895,7 @@ function renderList() {
     const s = visible().find((x) => x.path === expanded);
     if (s?._share) delete s._share.fresh;
   }
+  list.scrollTop = keepScroll;
   const cur = list.querySelector(".row.sel");
   if (cur) cur.scrollIntoView({block: "nearest"});
   // an expanded card must be fully visible — its action bar lives at the bottom
@@ -918,6 +960,31 @@ $("#list").addEventListener("click", (ev) => {
     return;
   }
   if (t.closest("#resume")) return void doResume(s);
+  if (t.closest("#openin-caret")) {
+    const r = t.closest("#openin-caret").getBoundingClientRect();
+    closeMenu();
+    menu = {items: [
+      ...(openTargetFor(s) ? [{t: `Open in ${openTargetFor(s)}`, k: "⌥⏎", run: () => doResume(s)}] : []),
+      {t: "Open folder in Finder", run: () =>
+        api("/api/open_dir", {path: s.path, target: "finder"})
+          .then((d) => toast(d.ok ? "Opened in Finder" : "Couldn't open folder"))
+          .catch((e) => toast(e.message))},
+      {t: "Open folder in Terminal", run: () =>
+        api("/api/open_dir", {path: s.path, target: "terminal"})
+          .then((d) => toast(d.ok ? "Opened in Terminal" : "Couldn't open folder"))
+          .catch((e) => toast(e.message))},
+    ], sel: 0, s, sub: null};
+    const el = document.createElement("div");
+    el.id = "menu"; el.setAttribute("role", "menu");
+    el.innerHTML = menuHTML(menu.items, 0);
+    document.body.appendChild(el);
+    placeMenu(el, r.left, r.bottom + 6);
+    el.addEventListener("click", (ev2) => {
+      const mi = ev2.target.closest("[data-mi]");
+      if (mi) { const it = menu.items[+mi.dataset.mi]; closeMenu(); it.run(); }
+    });
+    return;
+  }
   if (t.closest("#act-context")) return void copyContext(s);
   if (t.closest("#act-share")) return void doShare(s);
   if (t.closest("#act-msg")) return void sendResult(s, true);
@@ -967,7 +1034,13 @@ $("#list").addEventListener("contextmenu", (ev) => {
   else api("/api/file/preview", {path: s.path, files: [artChip.dataset.art]})
       .catch((e) => toast(e.message));
 });
+$("#list").addEventListener("dblclick", (ev) => {
+  if (mode !== "list" || ev.target.closest(".acc") || ev.target.closest(".card")) return;
+  const s = sessionAt(ev);
+  if (s && openTargetFor(s)) doResume(s);
+});
 $("#list").addEventListener("mouseover", (ev) => {
+  if (Date.now() - _navTs < 400) return;   // don't fight the arrow keys
   const row = ev.target.closest(".row[data-i]");
   if (!row || sel === +row.dataset.i) return;
   $("#list").querySelector(".row.sel")?.classList.remove("sel");
@@ -999,7 +1072,9 @@ function cardHtml(s) {
   const lastTxt = p && p.last && !(p.messages.slice(0, 3).some((m) => m.text === p.last)) ? p.last : "";
   const lastBlock = lastTxt ? `<div class="gap" title="conversation continues">⋯</div>
     <div class="msg a last"><i class="${roleCls}">${appShort(s)}</i><span title="this is what ⧉ copy last answer copies">${hi(lastTxt)}</span></div>` : "";
-  const chatHdr = '<div class="chathdr"><span>chat</span></div>';
+  const statBits = [s.n_msgs ? `${s.n_msgs} messages` : null,
+    s.n_images ? `${s.n_images} image${s.n_images > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ");
+  const chatHdr = `<div class="chathdr"><span>chat</span><span>${statBits}</span></div>`;
   const peek = !p ? '<div class="peekbox"><div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div></div>'
     : `<div class="peekbox">${chatHdr}<div class="peek">${head + lastBlock
       || '<div class="msg"><span class="share-meta">no readable messages</span></div>'}</div></div>`;
@@ -1041,13 +1116,7 @@ function cardHtml(s) {
     ${nSel ? `<button class="share small ghost" id="art-copy" title="put the actual file${nSel > 1 ? "s" : ""} on the clipboard">copy ${nSel > 1 ? nSel + " files" : "file"} <kbd class="ghostkey">⇧⌘C</kbd></button>
       <button class="share small ghost" id="art-go">share ${nSel > 1 ? nSel + " files" : "file"}</button>` : ""}
   </div>` : "";
-  const nPrim = prim.size || s.n_primary || 0;
-  const truth = (s.n_msgs || s.n_images || nAll)
-    ? `<div class="paysum">${[s.n_msgs ? `${s.n_msgs} messages` : null,
-        s.n_images ? `${s.n_images} image${s.n_images > 1 ? "s" : ""}` : null,
-        nPrim ? `${nPrim} artifact${nPrim > 1 ? "s" : ""}` : null,
-        nAll > nPrim ? `+${nAll - nPrim} other file${nAll - nPrim > 1 ? "s" : ""}` : null
-      ].filter(Boolean).join(" · ")}</div>` : "";
+  const truth = "";
   const openTarget = openTargetFor(s);
   // v2 action bar: the three verbs + open, with deep/expiry state visible
   const kbd = (k) => IS_NATIVE ? ` <kbd class="ghostkey">${k}</kbd>` : "";
@@ -1060,8 +1129,11 @@ function cardHtml(s) {
       data-tip="Last answer + files — file-aware apps take the files|⌘R">Send result${kbd("⌘R")}</button>
     <button class="actbtn" id="act-msg"
       data-tip="Send result as message — pastes as text anywhere|⌥⌘R">msg${kbd("⌥⌘R")}</button>
-    ${openTarget ? `<button class="actbtn" id="resume"
-      data-tip="Reopen this session|⌥⏎"><span class="applogo">${appLogo(s)}</span>${openTarget}</button>` : ""}
+    <span class="openin-wrap">
+      ${openTarget ? `<button class="actbtn" id="resume"
+        data-tip="Reopen this session|⌥⏎"><span class="applogo">${appLogo(s)}</span>${openTarget}</button>` : ""}
+      <button class="actbtn caret" id="openin-caret" data-tip="Open in…">▾</button>
+    </span>
     ${opts.deep ? '<span class="chip-deep" data-tip="Deep mode on — full tool output + reasoning|⌘D">deep</span>' : ""}
   </div>`;
   const st = s._share;
@@ -1416,8 +1488,13 @@ document.addEventListener("keydown", (e) => {
     if (smartCopy()) e.preventDefault();
     return;
   }
-  if (e.key === "ArrowDown") { sel = Math.min(sel + 1, vis.length - 1); selPath = vis[sel]?.path; e.preventDefault(); render(); }
-  else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); selPath = vis[sel]?.path; e.preventDefault(); render(); }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    _navTs = Date.now();
+    sel = e.key === "ArrowDown" ? Math.min(sel + 1, vis.length - 1) : Math.max(sel - 1, 0);
+    selPath = vis[sel]?.path;
+    moveSel();   // class flip + scroll only — never rebuilds the DOM
+  }
   else if (e.key === "Enter" && mode === "list") {
     e.preventDefault();  // otherwise the search input beeps
     const s = vis[sel];
@@ -1453,12 +1530,20 @@ document.addEventListener("keydown", (e) => {
     if (files.length) copyFilesOnly(s, files);
     else toast("No files in this session");   // no silent fallback to the answer
   }
-  else if (e.key === "ArrowRight" && mode === "list") { toggle(vis[sel]); e.preventDefault(); }
+  else if (e.key === "ArrowRight" && mode === "list") {
+    e.preventDefault();
+    if (expanded !== vis[sel]?.path) toggle(vis[sel]);   // right only goes IN
+  }
+  else if (e.key === "ArrowLeft" && mode === "list") {
+    e.preventDefault();
+    if (expanded) { expanded = null; render(); }          // left goes back out
+  }
   else if (e.key === "Escape") {
     e.preventDefault();  // no system beep
     if (expanded) { expanded = null; render(); }
     else if (mode === "shares") { mode = "list"; $("#btn-shares").classList.remove("on"); render(); }
-    else if ($("#q").value) { $("#q").value = ""; contentHits = []; render(); }
+    else if ($("#q").value) { $("#q").value = ""; $("#q-clear").classList.remove("show"); contentHits = []; render(); }
+    else if (srcFilter !== "all") { srcFilter = "all"; sel = 0; render(); }
     else { closeMenu(); nativePost("hide"); }
   } else if (!e.metaKey && !e.ctrlKey && e.key.length === 1) $("#q").focus();
 });

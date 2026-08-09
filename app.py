@@ -961,6 +961,22 @@ class Handler(BaseHTTPRequestHandler):
                          if m["role"] in ("user", "assistant") and (m.get("text") or "").strip())
             return self._json({"file": fpath, "name": fname, "messages": n_msgs,
                                "mode": opts["mode"], "redacted": opts["redact"]})
+        if route == "/api/open_dir":
+            path, target = body.get("path", ""), body.get("target", "finder")
+            if not _allowed(path):
+                return self._json({"error": "invalid path"}, 400)
+            try:
+                cwd = _session_entry(path).get("cwd") or ""
+            except KeyError as e:
+                return self._json({"error": str(e)}, 400)
+            if not (cwd and os.path.isdir(cwd)):
+                return self._json({"error": "no project folder for this session"}, 400)
+            if target == "terminal":
+                ok, _ = _open_in_terminal(f"cd {cwd!r}", cwd)
+            else:
+                ok = subprocess.run(["open", cwd], capture_output=True,
+                                    timeout=10).returncode == 0
+            return self._json({"ok": ok, "cwd": cwd})
         if route == "/api/open_url":
             u = body.get("url", "")
             if not (isinstance(u, str) and u.startswith("https://")):
