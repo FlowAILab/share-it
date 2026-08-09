@@ -64,16 +64,9 @@ body.browser #panel {
 #hr { height: 1px; background: var(--hair); margin: 0 14px; }
 #opts { padding: 0 18px 10px; }
 /* row accessory overlay — never in normal flow, never reserves space */
-.acc { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  display: inline-flex; align-items: center; gap: 2px;
-  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.1s ease-out; }
-.row.sel .acc, .row-line:hover .acc { opacity: 1; visibility: visible; pointer-events: auto; }
-.row .m .proj, .row .m .when { transition: opacity 0.1s ease-out; }
-.row.sel .m .proj, .row.sel .m .when,
-.row-line:hover .m .proj, .row-line:hover .m .when { opacity: 0; }
-.row.sel .t, .row-line:hover .t { padding-right: 168px; }
-/* the file pill never fades — it must stay clickable on hover */
-.row.sel .m .clip, .row-line:hover .m .clip { position: relative; z-index: 3; margin-right: 150px; }
+.acc-icons { display: none; align-items: center; gap: 2px; }
+.row.sel .acc-icons, .row-line:hover .acc-icons { display: inline-flex; }
+/* pill stays; idle-meta swaps to accessory icons on hover (see .meta-idle) */
 .acc { gap: 4px; }
 .rowicon { width: 28px; height: 28px; border: none; border-radius: 8px; cursor: pointer;
   background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.78); display: inline-flex;
@@ -122,12 +115,14 @@ body.browser #panel {
   font: 500 14px/20px -apple-system, "SF Pro Text", system-ui; color: rgba(255,255,255,0.96); }
 .row .m { flex: none; margin-left: auto; font-size: 12px; color: rgba(255,255,255,0.62);
   font-variant-numeric: tabular-nums; display: inline-flex; gap: 9px; align-items: center; }
+.row .meta-idle { display: inline-flex; gap: 9px; align-items: center; }
+.row.sel .meta-idle, .row-line:hover .meta-idle { display: none; }   /* idle meta hides; icons take its place */
 .row .m .proj { color: rgba(255,255,255,0.55); }
 .row .m .when { min-width: 30px; text-align: right; color: rgba(255,255,255,0.7); font-weight: 500; }
 .recent-tag { font: 500 9.5px ui-monospace, Menlo, monospace; letter-spacing: 0.06em;
   text-transform: uppercase; color: rgba(255,255,255,0.35);
   border: 1px solid rgba(255,255,255,0.12); border-radius: 5px; padding: 1px 5px; }
-.row .clip { flex: none; display: inline-flex; align-items: center; gap: 3px; cursor: pointer;
+.row .clip { flex: none; display: inline-flex; align-items: center; gap: 3px; cursor: pointer; border: 1px solid rgba(224,178,113,0.28);
              font: 600 11px/1 -apple-system, system-ui; font-variant-numeric: tabular-nums;
              color: #e0b271; background: rgba(224,178,113,0.14);
              border: 1px solid rgba(224,178,113,0.28); border-radius: 6px; padding: 2px 6px; }
@@ -615,16 +610,6 @@ function openMenu(s, x, y, anchorRight) {
   document.body.appendChild(el);
   placeMenu(el, x, y, anchorRight);
   el.querySelector(".mi.sel")?.focus?.();
-  el.addEventListener("keydown", (ev) => {
-    if (!["ArrowDown", "ArrowUp", "Enter", " ", "Escape", "Tab"].includes(ev.key)) return;
-    ev.preventDefault(); ev.stopPropagation();   // stop ONLY the keys we own
-    const mis = [...el.querySelectorAll(".mi")];
-    const cur = mis.indexOf(document.activeElement);
-    if (ev.key === "ArrowDown") mis[Math.min(cur + 1, mis.length - 1)]?.focus();
-    else if (ev.key === "ArrowUp") mis[Math.max(cur - 1, 0)]?.focus();
-    else if (ev.key === "Enter" || ev.key === " ") document.activeElement?.click();
-    else closeMenu();
-  }, true);
   el.addEventListener("mouseover", (ev) => {
     const mi = ev.target.closest("[data-mi]");
     if (mi) { menu.sel = +mi.dataset.mi; syncMenuSel(); }
@@ -661,7 +646,19 @@ function openSub(item, anchorEl) {
 }
 
 document.addEventListener("click", (ev) => {
-  if (menu && !ev.target.closest("#menu") && !ev.target.closest("[data-menu]")) closeMenu();
+  if (menu && !ev.target.closest("#menu") && !ev.target.closest("#submenu") && !ev.target.closest("[data-menu]")) closeMenu();
+}, true);
+document.addEventListener("keydown", (ev) => {
+  const pop = $("#submenu") || $("#menu");   // submenu takes precedence
+  if (!pop) return;
+  if (!["ArrowDown", "ArrowUp", "Enter", " ", "Escape", "Tab"].includes(ev.key)) return;
+  ev.preventDefault(); ev.stopPropagation();
+  const mis = [...pop.querySelectorAll(".mi")];
+  const cur = mis.indexOf(document.activeElement);
+  if (ev.key === "ArrowDown") mis[Math.min(cur + 1, mis.length - 1)]?.focus();
+  else if (ev.key === "ArrowUp") mis[Math.max(cur < 0 ? 0 : cur - 1, 0)]?.focus();
+  else if (ev.key === "Enter" || ev.key === " ") (document.activeElement?.closest?.(".mi") || mis[0])?.click();
+  else if (ev.key === "Escape" || ev.key === "Tab") closeMenu();
 }, true);
 
 
@@ -892,7 +889,7 @@ function accessoryHtml(s) {
   const link = st === "busy"
     ? '<button class="rowicon" disabled>…</button>'
     : `<button class="rowicon${st && st.url ? " haslink" : ""}" data-share="1" data-tip="${st && st.url ? "Copy share link" : "Share link"}|⌘L">${I_LINK}</button>`;
-  return `<span class="acc">
+  return `<span class="acc-icons">
     <button class="rowicon" data-msg="1" data-tip="Send result as message|⌥⌘R">${I_BUBBLE}</button>
     ${link}
     <button class="rowicon${fresh ? " ok" : " primary"}" data-ctx="1" data-tip="Copy context|⏎">${fresh ? I_CHECK : I_STACK}</button>
@@ -926,11 +923,10 @@ function renderList() {
         <span class="t">${hiText(s.title)}${s._snippet && $("#q").value.trim().length >= 2
           ? `<span class="snip">${esc(s._snippet).replace(/«/g, "<b>").replace(/»/g, "</b>")}</span>` : ""}</span>
         <span class="m">
-          ${!query && srcFilter === "all" && recentSet.has(s.path) && i < 2 ? '<span class="recent-tag">recent</span>' : ""}
           ${(s.n_primary ?? s.arts) ? `<button class="clip" data-files="1" tabindex="0" data-tip="${s.n_primary ?? s.arts} file${(s.n_primary ?? s.arts) > 1 ? "s" : ""} — click to view"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.n_primary ?? s.arts}</button>` : ""}
-          <span class="proj">${esc(s.project || "")}</span><span class="when">${rel(s.last_used || s.mtime)}</span>
+          <span class="meta-idle">${!query && srcFilter === "all" && recentSet.has(s.path) && i < 2 ? '<span class="recent-tag">recent</span>' : ""}<span class="proj">${esc(s.project || "")}</span><span class="when">${rel(s.last_used || s.mtime)}</span></span>
+          ${accessoryHtml(s)}
         </span>
-        ${accessoryHtml(s)}
       </div>
       ${expanded === s.path ? cardHtml(s) : ""}
     </div>`).join("") : (query
@@ -982,6 +978,13 @@ $("#list").addEventListener("click", (ev) => {
   const t = ev.target;
   const resumeGlyph = t.closest("[data-resume]");
   if (resumeGlyph) { hideTip(); doResume(s); return; }       // app glyph opens the session
+  const filesBtn = t.closest("[data-files]");
+  if (filesBtn) {   // amber count pill → expand + jump to files (never collapse)
+    hideTip();
+    if (expanded !== s.path) { _wantScroll = true; toggle(s); }
+    setTimeout(() => $("#list").querySelector(".row.exp .arts")?.scrollIntoView({block: "nearest"}), 90);
+    return;
+  }
   const msgIcon = t.closest("[data-msg]");
   if (msgIcon) { hideTip(); sendResult(s, true); return; }   // send result as message
   const shareIcon = t.closest("[data-share]");
@@ -1300,17 +1303,10 @@ async function doShare(s, modeOverride) {
   if (!s || s._share === "busy") return;
   const wantMode = modeOverride || (opts.deep ? "deep" : "agent");
   // #9: a cached link is only reusable if it was built for THIS mode + files
-  const cacheOk = s._share?.url && !modeOverride && s._share.mode === wantMode
-    && !s._selTouched && s._share.mtime === s.mtime
-    && (s._share.expires == null || s._share.expires - Date.now()/1000 > 60);
-  if (cacheOk) {
-    if (!(await copyText(s._share.url)))
-      return toast("Clipboard write failed — try again");
-    const n = s._share.n_files;
-    toast(`Link copied${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
-    return;
-  }
-  if (s._share && !cacheOk && s._share !== "busy") s._share = null;   // stale/expired — rebuild
+  // no client-side link reuse — the server's find_cached validates fingerprint+
+  // mtime+expiry and returns the same URL when it's genuinely still good, so we
+  // can never hand out a stale/expired/deleted link
+  if (s._share && s._share !== "busy") s._share = null;
   s._share = "busy"; render();
   const gen = optsGen;
   try {
