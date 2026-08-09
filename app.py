@@ -250,6 +250,33 @@ def _render_opts(body):
                 artifacts=body.get("artifacts", True), fmt="md", files=files)
 
 
+_TERMINALS = [("Warp", "Warp"), ("iTerm", "iTerm"), ("Ghostty", "Ghostty"),
+              ("WezTerm", "WezTerm"), ("kitty", "kitty"), ("Alacritty", "Alacritty"),
+              ("Hyper", "Hyper"), ("Terminal", "Terminal")]
+
+
+def _installed_terminals():
+    """Terminal apps present on this Mac, best-first (Warp before stock Terminal)."""
+    import glob as _g
+    found = []
+    roots = ["/Applications", os.path.expanduser("~/Applications")]
+    for label, appname in _TERMINALS:
+        for r in roots:
+            if os.path.isdir(os.path.join(r, appname + ".app")):
+                found.append({"name": appname, "label": label})
+                break
+    return found
+
+
+def _open_dir_in_app(cwd, appname):
+    """Open a folder in a specific app via `open -a` (Warp/iTerm open a window there)."""
+    try:
+        return subprocess.run(["open", "-a", appname, cwd], capture_output=True,
+                              timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _open_in_terminal(cmd, cwd):
     """Run cmd in macOS Terminal.app — the stock, always-present choice."""
     esc = cmd.replace("\\", "\\\\").replace('"', '\\"')
@@ -698,6 +725,22 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             self._json({"answer": answer, "code_blocks": blocks,
                         "html": html, "files": mentioned[:5]})
+        elif route == "/api/chat":
+            path = parse_qs(parsed.query).get("path", [""])[0]
+            if not _allowed(path):
+                return self._json({"error": "invalid path"}, 400)
+            try:
+                msgs = adapters.by_id(_session_entry(path)["source"]).parse(path)
+            except (OSError, ValueError, KeyError) as e:
+                return self._json({"error": str(e)}, 400)
+            out = []
+            for m in msgs:
+                if m["role"] in ("user", "assistant") and (m.get("text") or "").strip():
+                    t = render.redact(" ".join(m["text"].split()))
+                    out.append({"role": m["role"], "text": t[:2000]})
+            self._json({"messages": out[-200:]})
+        elif route == "/api/openers":
+            self._json({"terminals": _installed_terminals()})
         elif route == "/api/shares":
             self._json({"shares": share.load_shares()})
         else:
@@ -971,11 +1014,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
             if not (cwd and os.path.isdir(cwd)):
                 return self._json({"error": "no project folder for this session"}, 400)
-            if target == "terminal":
-                ok, _ = _open_in_terminal(f"cd {cwd!r}", cwd)
-            else:
+            if target == "finder":
                 ok = subprocess.run(["open", cwd], capture_output=True,
                                     timeout=10).returncode == 0
+            else:  # a terminal app name — must be one we actually detected
+                names = {t["name"] for t in _installed_terminals()}
+                if target not in names:
+                    return self._json({"error": "unknown app"}, 400)
+                ok = _open_dir_in_app(cwd, target)
             return self._json({"ok": ok, "cwd": cwd})
         if route == "/api/open_url":
             u = body.get("url", "")
