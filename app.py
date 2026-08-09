@@ -301,8 +301,11 @@ def _artifact_fingerprint(session, opts):
             for r in m.get("media_refs") or []:
                 p = r.get("path") or ""
                 try:
-                    st = os.stat(p)
-                    parts.append(f"ref:{p}:{st.st_size}:{round(st.st_mtime, 3)}")
+                    h = hashlib.sha256()   # content digest — same-size/mtime
+                    with open(p, "rb") as fh:   # replacements must invalidate
+                        for chunk in iter(lambda: fh.read(1 << 20), b""):
+                            h.update(chunk)
+                    parts.append(f"ref:{p}:{int(bool(r.get('structured')))}:{h.hexdigest()}")
                 except OSError:
                     parts.append(f"ref:{p}:missing")
     except Exception:
@@ -1180,7 +1183,8 @@ def _fts_indexer():
     todo.sort(key=lambda e: -e["mtime"])
     for ent in todo:
         try:
-            if not search.needs_index(ent["path"], ent["mtime"], ent.get("size")):
+            if not search.needs_index(ent["path"], ent["mtime"], ent.get("size"),
+                                      title=ent.get("title", "")):
                 continue
             search.index_session(ent["path"], ent["mtime"],
                                  parsers.parse_session(ent["path"]),

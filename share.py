@@ -313,6 +313,7 @@ def find_cached(session, opts, artifact=None):
         if (s.get("path") == session["path"] and not s.get("deleted")
                 and s.get("artifact") == artifact
                 and s.get("src_mtime") == live_mtime
+                and (artifact or s.get("title") == session.get("title"))
                 and s.get("req_hours") == opts.get("expires_hours", EXPIRES_HOURS)
                 and exp_ok
                 and s.get("redacted") == bool(opts.get("redact", True))

@@ -267,6 +267,102 @@ ck("javascript: link not linkified", 'href="javascript:' not in h)
 ck("no <img> ever emitted", "<img" not in h)
 ck("https link allowed", 'href="https://good.example"' in h)
 
+
+# ---- provenance: spoofed text-marker refs vs structured refs (remote) -------
+bundle._REF_ROOTS_REMOTE = (TMP,)          # containment root = our tmp sandbox
+bundle._REF_ROOTS_LOCAL = (TMP,)
+spoof = [{"role": "user", "text": "x",
+          "media_refs": [{"path": png, "structured": False}]}]
+o_s, k_s = bundle.resolve_media([dict(m) for m in spoof], remote=True)
+ck("remote: spoofed text-marker ref inside allowed root still refused",
+   k_s == 1 and not o_s)
+o_l, k_l = bundle.resolve_media([dict(m) for m in spoof], remote=False)
+ck("local: same ref resolves", k_l == 0 and len(o_l) == 1)
+struct = [{"role": "user", "text": "x",
+           "media_refs": [{"path": png, "structured": True}]}]
+o_t, k_t = bundle.resolve_media(struct, remote=True)
+ck("remote: structured ref inside allowed root resolves", k_t == 0 and len(o_t) == 1)
+
+# ---- file-backed refs get metadata-stripped ---------------------------------
+import struct as _st
+def _chunk(t, d):
+    return _st.pack(">I", len(d)) + t + d + b"\x00\x00\x00\x00"
+meta_png = os.path.join(TMP, "meta.png")
+open(meta_png, "wb").write(b"\x89PNG\r\n\x1a\n" + _chunk(b"tEXt", b"GPS secret loc")
+                           + _chunk(b"IEND", b""))
+mm = [{"role": "user", "text": "x", "media_refs": [{"path": meta_png, "structured": True}]}]
+om, _ = bundle.resolve_media(mm, remote=True)
+ck("EXIF/text chunks stripped from file-backed refs",
+   om and b"GPS secret loc" not in om[-1]["data"])
+
+# ---- sub-notice caps + exact inline boundary --------------------------------
+tb, _ = bundle.render_transcript(SESSION, manym, deep=False, global_cap=100)
+ck("sub-notice cap (100B) holds", len(tb.encode()) <= 100, len(tb.encode()))
+pad_doc = bundle.build(SESSION, [{"role": "user", "text": "q"},
+                                 {"role": "assistant", "text": "a", "stop": "end_turn"}])
+room = bundle.INLINE_LIMIT - len((pad_doc["doc"] + "\n---\nFull bundle (kept ≥7 days): "
+                                  + pad_doc["md_path"] + "\n").encode())
+k_at, _t1 = bundle.compose_clipboard(SESSION, pad_doc, [], inline_limit=len(
+    (pad_doc["doc"] + "\n---\nFull bundle (kept ≥7 days): " + pad_doc["md_path"] + "\n").encode()))
+k_under, _t2 = bundle.compose_clipboard(SESSION, pad_doc, [], inline_limit=len(
+    (pad_doc["doc"] + "\n---\nFull bundle (kept ≥7 days): " + pad_doc["md_path"] + "\n").encode()) - 1)
+ck("payload == limit → inline", k_at == "inline", k_at)
+ck("payload == limit+1 → pointer", k_under == "pointer", k_under)
+
+# ---- FTS: title-only change triggers reindex --------------------------------
+import search
+search.DB_PATH = os.path.join(TMP, "fts.sqlite")
+search.index_session("/x/p.jsonl", 5.0, [{"role": "user", "text": "hello"}],
+                     title="old name", size=10)
+ck("fts: unchanged → no reindex",
+   not search.needs_index("/x/p.jsonl", 5.0, 10, title="old name"))
+ck("fts: title-only change → reindex",
+   search.needs_index("/x/p.jsonl", 5.0, 10, title="Official New Name"))
+
+# ---- share cache: title change invalidates ----------------------------------
+import share as _share
+_share.SHARES_PATH = os.path.join(TMP, "shares.json")
+sess_t = {"source": "codex", "path": "/x/t.jsonl", "title": "derived words",
+          "mtime": 7.0}
+_share._src_mtime = lambda s, artifact=None: 7.0
+rec = _share.record_share(sess_t, {"url": "https://x/1", "provider": "hosted",
+                                   "ref": "b/1", "hours": None}, {"expires_hours": 0,
+                                   "redact": True, "mode": "agent", "fmt": "md",
+                                   "art_mtime": 0, "artifacts": True,
+                                   "thinking": False}, 100, file_paths=[])
+opts_t = {"expires_hours": 0, "redact": True, "mode": "agent", "fmt": "md",
+          "art_mtime": 0, "artifacts": True, "thinking": False}
+ck("share cache hit with same title", _share.find_cached(sess_t, opts_t) is not None)
+sess_t2 = dict(sess_t, title="Official Thread Name")
+ck("share cache MISS after title-only rename",
+   _share.find_cached(sess_t2, opts_t) is None)
+
+# ---- codex official-title sources (sqlite + session_index overlay) ----------
+import sqlite3 as _sq, parsers as _p
+fake_home = os.path.join(TMP, "codexhome"); os.makedirs(fake_home, exist_ok=True)
+rollout = os.path.join(TMP, "rollout-2026-01-01T00-00-00-"
+                       + "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000.jsonl")
+open(rollout, "w").write("{}")
+con = _sq.connect(os.path.join(fake_home, "state_9.sqlite"))
+con.execute("CREATE TABLE threads (rollout_path TEXT, title TEXT, name TEXT, "
+            "first_user_message TEXT, preview TEXT, cwd TEXT, source TEXT, "
+            "model TEXT, tokens_used INT, git_branch TEXT)")
+con.execute("INSERT INTO threads VALUES (?, 'DB Title', NULL, 'raw first msg', "
+            "'', '/w', 'user', 'gpt', 5, 'main')", (rollout,))
+con.commit(); con.close()
+open(os.path.join(fake_home, "session_index.jsonl"), "w").write(
+    '{"id": "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000", "thread_name": "Sidebar Name", "updated_at": "x"}\n')
+_old_home = _p._CODEX_HOME; _p._CODEX_HOME = fake_home
+try:
+    idx = _p._codex_sqlite_index()
+    hit = idx.get(os.path.realpath(rollout))
+    ck("codex sqlite title read", hit is not None and hit[0] in ("DB Title", "Sidebar Name"))
+    ck("session_index thread_name overlays sqlite title",
+       hit is not None and hit[0] == "Sidebar Name", hit and hit[0])
+finally:
+    _p._CODEX_HOME = _old_home
+
+
 print()
 if FAIL:
     print(f"{len(FAIL)} FAILURES: {FAIL}")

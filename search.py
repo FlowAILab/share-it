@@ -8,7 +8,7 @@ import os
 import sqlite3
 
 DB_PATH = os.path.expanduser("~/.shareit/fts.sqlite")
-FTS_VERSION = 3  # coupled to parser SCHEMA_VERSION + size-aware invalidation
+FTS_VERSION = 4  # v4: title-aware invalidation (Codex renames threads late)
 _CAPS = {"user_text": 400_000, "assistant_text": 400_000, "tools": 120_000}
 
 
@@ -23,16 +23,19 @@ def _conn():
         conn.execute("DROP TABLE IF EXISTS msgs")  # v1 layout
         conn.execute("INSERT OR REPLACE INTO meta VALUES ('version', ?)",
                      (str(FTS_VERSION),))
-    conn.execute("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, mtime REAL, size INTEGER)")
+    conn.execute("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, mtime REAL, size INTEGER, title TEXT)")
     conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS sess USING fts5("
                  "path UNINDEXED, title, user_text, assistant_text, tools)")
     return conn
 
 
-def needs_index(path, mtime, size=None):
+def needs_index(path, mtime, size=None, title=None):
     with _conn() as conn:
-        row = conn.execute("SELECT mtime, size FROM files WHERE path = ?", (path,)).fetchone()
-    return row is None or row[0] != mtime or (size is not None and row[1] != size)
+        row = conn.execute("SELECT mtime, size, title FROM files WHERE path = ?", (path,)).fetchone()
+    # title participates: Codex writes official thread names AFTER the rollout
+    # stops changing, so a title-only rename must reindex
+    return (row is None or row[0] != mtime or (size is not None and row[1] != size)
+            or (title is not None and row[2] != title))
 
 
 def index_session(path, mtime, messages, title="", extra="", size=None):
@@ -51,8 +54,8 @@ def index_session(path, mtime, messages, title="", extra="", size=None):
                      "VALUES (?, ?, ?, ?, ?)",
                      (path, (title + " " + extra).strip(), joined["user_text"],
                       joined["assistant_text"], joined["tools"]))
-        conn.execute("INSERT OR REPLACE INTO files (path, mtime, size) VALUES (?, ?, ?)",
-                     (path, mtime, size))
+        conn.execute("INSERT OR REPLACE INTO files (path, mtime, size, title) VALUES (?, ?, ?, ?)",
+                     (path, mtime, size, title))
 
 
 def prune(live_paths):
