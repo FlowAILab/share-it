@@ -19,6 +19,9 @@ _SECRET_PATTERNS = [
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b"),  # JWT
     # key=value style assignments for secret-ish names (keeps the name, drops the value)
     re.compile(r"(?i)\b((?:api[_-]?key|apikey|token|secret|password|passwd|pwd|credentials?|private[_-]?key|bearer)['\"]?\s*[=:]\s*)['\"]?[^\s'\"]{6,}"),
+    # prose-style "password 12345678" — value redacted only when it carries a
+    # digit, so "password protected" and friends survive
+    re.compile(r"(?i)\b((?:password|passcode|passwd|pwd|pin)\s+)(?=\S*\d)\S{4,}"),
     re.compile(r"(?i)(authorization:\s*bearer\s+)\S+"),
 ]
 
@@ -214,6 +217,71 @@ def _strip_image_token(text, msg):
     if any(m.get("name") for m in msg.get("media") or []):
         return text.replace("[image]", "").strip() or ""
     return text
+
+
+_HTTP_LINK = re.compile(r"\[([^\]\n]+)\]\(((?:https?:|mailto:)[^)\s]+)\)")
+
+
+def result_clipboard_html(text, redact_secrets=True):
+    """Send-result flavor: the assistant's markdown rendered to INLINE-STYLED
+    html for the pasteboard (web apps strip <style> blocks on paste).
+
+    Safety contract: source is untrusted — escaped FIRST so no raw HTML
+    survives; links allowlisted to http(s)/mailto; NO <img> is ever emitted
+    (nothing for the RTF converter or a paste target to fetch)."""
+    if redact_secrets:
+        text = redact(text or "")
+    P = 'margin:0 0 10px;font:14px/1.5 -apple-system,sans-serif;color:#1a1a1a'
+    H = 'margin:14px 0 6px;font:600 15px/1.4 -apple-system,sans-serif;color:#1a1a1a'
+    PRE = ('margin:0 0 10px;padding:8px 11px;background:#f5f5f4;border-radius:6px;'
+           'font:12px/1.5 ui-monospace,Menlo,monospace;color:#333;white-space:pre-wrap')
+    CODE = ('background:#f5f5f4;border-radius:4px;padding:1px 4px;'
+            'font:0.85em ui-monospace,Menlo,monospace')
+    LI = 'margin:0 0 4px 14px;font:14px/1.5 -apple-system,sans-serif;color:#1a1a1a'
+
+    def inline(line):
+        line = _HTTP_LINK.sub(r'<a href="\2" rel="noopener">\1</a>', line)
+        line = _MD_BOLD.sub(r"<strong>\1</strong>", line)
+        return _MD_CODE.sub(rf'<code style="{CODE}">\1</code>', line)
+
+    out, in_fence, fence_buf, para = [], False, [], []
+
+    def flush_para():
+        if para:
+            out.append(f'<p style="{P}">' + "<br>".join(para) + "</p>")
+            para.clear()
+
+    for line in _esc(text or "").split("\n"):
+        if line.strip().startswith("```"):
+            if in_fence:
+                out.append(f'<pre style="{PRE}">' + "\n".join(fence_buf) + "</pre>")
+                fence_buf.clear()
+            else:
+                flush_para()
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            fence_buf.append(line)
+            continue
+        s = line.lstrip()
+        if s.startswith(("#", "- ", "* ")) or not s:
+            flush_para()
+        if not s:
+            continue
+        if s.startswith("### "):
+            out.append(f'<div style="{H}">{inline(s[4:])}</div>')
+        elif s.startswith("## "):
+            out.append(f'<div style="{H}">{inline(s[3:])}</div>')
+        elif s.startswith("# "):
+            out.append(f'<div style="{H}">{inline(s[2:])}</div>')
+        elif s.startswith(("- ", "* ")):
+            out.append(f'<div style="{LI}">•&ensp;{inline(s[2:])}</div>')
+        else:
+            para.append(inline(line))
+    flush_para()
+    if in_fence and fence_buf:
+        out.append(f'<pre style="{PRE}">' + "\n".join(fence_buf) + "</pre>")
+    return "".join(out)
 
 
 def _img_origin(media_base):

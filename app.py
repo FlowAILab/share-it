@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import adapters
+import bundle
 import parsers
 import render
 import search
@@ -233,18 +234,20 @@ def _render_opts(body):
     if hours not in EXPIRY_CHOICES:
         hours = 168
     mode = body.get("mode", "agent")
-    mode = {"msgs": "human", "full": "agent"}.get(mode, mode)  # legacy names
-    if mode not in ("human", "agent", "deep"):
+    # v2: two modes only — agent and deep. Legacy "human"/"msgs" map to agent
+    # (the reader-page feature is retired from the UI; render_html code stays).
+    mode = {"msgs": "agent", "human": "agent", "full": "agent"}.get(mode, mode)
+    if mode not in ("agent", "deep"):
         mode = "agent"
-    # the mode decides the format and whether reasoning ships — callers cannot mix
-    fmt = "html" if mode == "human" else "md"
     files = body.get("files")
     if not (isinstance(files, list) and all(isinstance(f, str) for f in files)):
         files = None
-    return dict(redact=body.get("redact", True),
+    # redaction is ALWAYS on, server-side — the client flag is ignored on
+    # every route, legacy included
+    return dict(redact=True,
                 thinking=mode == "deep",
-                mode=mode, messages_only=mode == "human", expires_hours=hours,
-                artifacts=body.get("artifacts", True), fmt=fmt, files=files)
+                mode=mode, messages_only=False, expires_hours=hours,
+                artifacts=body.get("artifacts", True), fmt="md", files=files)
 
 
 def _open_in_terminal(cmd, cwd):
@@ -411,12 +414,12 @@ def _assemble_bundle(path, opts):
     Raises ValueError with a human message when the selection can't ship.
     """
     import mimetypes
-    import media as _media
     session = _session_entry(path)
     adapter = adapters.by_id(session["source"])
     messages = adapter.parse(path)
     files = _effective_files(session, opts) if opts.get("artifacts") else []
-    media_objs = _media.collect(messages)   # annotates messages' media names
+    # annotates messages' media names; resolves codex file-ref attachments too
+    media_objs, media_skipped = bundle.resolve_media(messages)
     taken = {"manifest.json"} | {m["name"] for m in media_objs}
     index_name = "chat.html" if opts.get("fmt") == "html" else "chat.md"
     taken.add(index_name)
@@ -446,7 +449,7 @@ def _assemble_bundle(path, opts):
     if opts.get("mode") == "deep":
         reads = adapter.reads(path, cwd=session.get("cwd") or None)
     return session, messages, media_objs, fobjs, artifact_links, \
-        index_name, card, shared_paths, stats, reads
+        index_name, card, shared_paths, stats, reads, media_skipped
 
 
 def _render_index(session, messages, opts, artifact_links, stats, reads, media_base):
@@ -469,17 +472,13 @@ def _render_index(session, messages, opts, artifact_links, stats, reads, media_b
             artifact_links=links or None, card=card,
             mode_label=opts["mode"], expiry_label=expiry_label,
             media_base=media_base)
-    last_request = next((m["text"] for m in reversed(messages)
-                         if m["role"] == "user" and m["text"].strip()), "")
-    return render.render_markdown(
-        session, messages, redact_secrets=opts["redact"],
-        include_thinking=opts["thinking"], messages_only=opts["messages_only"],
-        tool_output_limit=10000 if deep else 1200,
-        tool_input_limit=4000 if deep else 500,
-        artifact_links=links or None, stats=stats, mode=opts["mode"],
-        last_request=last_request, cwd=session.get("cwd") or None,
-        expiry_label=expiry_label, media_base=media_base,
-        read_files=reads or None)
+    # v2 markdown shares use the SAME renderer as local bundles, in remote mode:
+    # tiered budgets, structured tool headers, scrubbed header (no resume cmd,
+    # basename cwd, no absolute paths), hosted-URL media links.
+    head = bundle.header_md(session, messages, links, reads, deep=deep,
+                            remote=True, resume_cmd=None, expiry_label=expiry_label)
+    body, _meta = bundle.render_transcript(session, messages, deep=deep, remote=True)
+    return (head + body).replace(bundle._MEDIA_TOKEN, media_base or "media")
 
 
 def _render_md(path, opts, upload_artifacts=False):
@@ -730,7 +729,8 @@ class Handler(BaseHTTPRequestHandler):
                                            "n_files": cached.get("n_files", 0),
                                            "n_images": cached.get("n_images", 0)})
                 (session, messages, media_objs, fobjs, artifact_links,
-                 index_name, card, shared_paths, stats, reads) = _assemble_bundle(path, opts)
+                 index_name, card, shared_paths, stats, reads,
+                 media_skipped) = _assemble_bundle(path, opts)
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
             if route == "/api/preview":
@@ -765,7 +765,8 @@ class Handler(BaseHTTPRequestHandler):
                                                "n_images": len(media_objs)})
             return self._json({"url": entry["url"], "size": len(doc), "card": card,
                                "provider": entry["provider"], "expires": entry["expires"],
-                               "n_files": len(shared_paths), "n_images": len(media_objs)})
+                               "n_files": len(shared_paths), "n_images": len(media_objs),
+                               "images_skipped": media_skipped})
         if route == "/api/copy_chat":
             # ⌘C copies THE CHAT — identical in every mode, never a network
             # call. ONE pasteboard item: plain = full markdown, html/rtf carry
@@ -796,6 +797,81 @@ class Handler(BaseHTTPRequestHandler):
                                    "messages": n_msgs, "images": len(media_objs)})
             except (OSError, ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
+        if route == "/api/copy_context":
+            # ⏎/⌘C — the local agent-handoff verb. Builds an immutable on-disk
+            # generation, then returns TEXT ONLY: full inline markdown when the
+            # composed payload fits INLINE_LIMIT, else a handoff prompt + path.
+            path, deep = body.get("path", ""), bool(body.get("deep"))
+            if not _allowed(path):
+                return self._json({"error": "invalid path"}, 400)
+            try:
+                session = _session_entry(path)
+                adapter = adapters.by_id(session["source"])
+                messages = adapter.parse(path)
+                arts = _session_artifacts(session)
+                reads = [r for r in adapter.reads(path, cwd=session.get("cwd") or None)
+                         if not any(a["path"] == r["path"] for a in arts)]
+                resume = adapter.resume_command(path, cwd=session.get("cwd") or None)
+                built = bundle.build(session, messages, deep=deep,
+                                     resume_cmd=resume, artifacts=arts, reads=reads)
+            except (OSError, ValueError, KeyError) as e:
+                return self._json({"error": str(e)}, 400)
+            kind, text = bundle.compose_clipboard(
+                session, built,
+                [a for a in arts if a.get("kind") in ("created", "modified")])
+            threading.Thread(target=bundle.gc, daemon=True).start()
+            n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
+                         and ((m.get("text") or "").strip() or m.get("media")))
+            return self._json({"kind": kind, "text": text,
+                               "path": built["md_path"], "size": built["size"],
+                               "messages": n_msgs, "images": built["images"],
+                               "images_skipped": built["images_skipped"],
+                               "deep": deep})
+        if route == "/api/result":
+            # ⌘R — Send result: last COMPLETED answer + curated artifact files.
+            # files omitted → server-computed default; files: [] → none.
+            path = body.get("path", "")
+            if not _allowed(path):
+                return self._json({"error": "invalid path"}, 400)
+            try:
+                session = _session_entry(path)
+                messages = adapters.by_id(session["source"]).parse(path)
+            except (OSError, ValueError, KeyError) as e:
+                return self._json({"error": str(e)}, 400)
+            msg = _completed_result(messages)
+            if msg is None:
+                return self._json(
+                    {"error": "No completed result — the session looks interrupted"}, 409)
+            answer = msg["text"]
+            html = render.result_clipboard_html(answer)
+            md = render.redact(answer)
+            files_req = body.get("files")
+            skipped = []
+            if files_req is None:
+                arts = _session_artifacts(session)
+                try:
+                    _, last = _peek_texts(path, session["mtime"])
+                except Exception:
+                    last = ""
+                files = []
+                for p in _primary_paths(arts, last or answer[:4000]):
+                    (files if os.path.isfile(p) else skipped).append(p)
+            else:
+                if not (isinstance(files_req, list)
+                        and all(isinstance(f, str) for f in files_req)):
+                    return self._json({"error": "bad files field"}, 400)
+                known = _known_files(session)
+                bad = [f for f in files_req if f not in known]
+                if bad:
+                    return self._json({"error": "not files of this session"}, 400)
+                missing = [f for f in files_req if not os.path.isfile(f)]
+                if missing:
+                    names = ", ".join(os.path.basename(f) for f in missing[:4])
+                    return self._json(
+                        {"error": f"selected file(s) no longer exist: {names}"}, 400)
+                files = files_req
+            return self._json({"answer": md, "html": html, "files": files,
+                               "skipped": [os.path.basename(s) for s in skipped]})
         if route in ("/api/file/copy", "/api/file/reveal", "/api/file/open", "/api/file/preview"):
             path, files = body.get("path", ""), body.get("files") or []
             if not _allowed(path) or not files:
@@ -940,6 +1016,33 @@ _MEANINGFUL_EXT = re.compile(
 _TEMPISH = re.compile(
     r"(^|/)(node_modules|__pycache__|dist|build|target|\.wrangler|\.git|\.venv|venv)(/|$)"
     r"|\.(log|tmp|lock|pyc|pyo|o|class|map|min\.js)$|(^|/)\.DS_Store$")
+
+
+def _completed_result(messages):
+    """The message 'Send result' ships: the last COMPLETED assistant answer
+    after the latest user request, or None.
+
+    Uniform completion rule: when the client records completion metadata
+    (Claude stop_reason, Codex phase), the chosen answer must be a completed
+    one (end_turn / final_answer) — an interrupted tool run or a stale
+    prior-turn answer is never sent. Metadata-less clients fall back to the
+    last non-empty assistant message (best-effort, documented)."""
+    last_user = -1
+    for i, m in enumerate(messages):
+        if m["role"] == "user" and ((m.get("text") or "").strip() or m.get("media")):
+            last_user = i
+    tail = [m for m in messages[last_user + 1:]
+            if m["role"] == "assistant" and (m.get("text") or "").strip()]
+    if not tail:
+        return None
+    has_meta = any(m.get("stop") is not None or m.get("phase") is not None
+                   for m in tail)
+    if not has_meta:
+        return tail[-1]
+    for m in reversed(tail):
+        if m.get("stop") == "end_turn" or m.get("phase") == "final_answer":
+            return m
+    return None
 
 
 def _primary_paths(artifacts, last_answer):
@@ -1106,6 +1209,7 @@ def main():
     _write_token()
     _fix_state_perms()
     _cleanup_state()
+    threading.Thread(target=bundle.gc, daemon=True).start()  # lease-respecting LRU
     _load_cache()
     _load_annot()
     with _lock:

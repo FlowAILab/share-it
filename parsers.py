@@ -106,8 +106,11 @@ MEDIA_MAX_ONE = 5_000_000       # b64 chars per image (~3.7MB decoded)
 MEDIA_MAX_PER_SESSION = 40
 
 # Codex wraps pasted images in <image src="/Users/…/x.png"> markers — local
-# paths leak usernames, so exports must never carry them.
+# paths leak usernames, so exports must never carry them. The src paths ARE
+# captured as media_refs (bytes resolved only at bundle-build time, behind
+# sniff + size checks) before the markers are stripped from the text.
 _IMAGE_MARKER = re.compile(r"</?image\b[^>]*>")
+_IMAGE_SRC = re.compile(r"<image\b[^>]*\bsrc=[\"']([^\"'>]+)[\"']")
 
 
 def _media_entry(media_type, data_b64, counter):
@@ -189,12 +192,16 @@ def parse_claude(path):
                         tool["output"] = rc if isinstance(rc, str) else json.dumps(rc)
                         tool["ok"] = not block.get("is_error", False)
         else:  # assistant
+            stop = (obj.get("message") or {}).get("stop_reason")
             for block in content or []:
                 bt = block.get("type")
                 if bt == "thinking":
                     messages.append({"role": "thinking", "text": block.get("thinking", "")})
                 elif bt == "text":
-                    messages.append({"role": "assistant", "text": block.get("text", "")})
+                    # stop_reason rides along so "Send result" can tell a
+                    # completed end_turn reply from an interrupted tool run
+                    messages.append({"role": "assistant", "text": block.get("text", ""),
+                                     "stop": stop})
                 elif bt == "tool_use":
                     tool = {"role": "tool", "name": block.get("name", "?"),
                             "input": json.dumps(block.get("input", {}), indent=None)[:100000],
@@ -229,29 +236,41 @@ def parse_codex(path):
             continue
         pt = payload.get("type")
         if pt == "message":
-            text = _IMAGE_MARKER.sub("", _content_text(payload.get("content")))
+            raw_text = _content_text(payload.get("content"))
+            refs = [{"path": p} for p in _IMAGE_SRC.findall(raw_text)
+                    if isinstance(p, str) and p.startswith("/")]
+            text = _IMAGE_MARKER.sub("", raw_text)
             role = payload.get("role")
             media = [m for m in (
                 _data_url_media(b.get("image_url"), media_count)
                 for b in (payload.get("content") or [])
                 if isinstance(b, dict) and b.get("type") == "input_image"
             ) if m]
+            for b in (payload.get("content") or []):   # file-path attachments
+                if (isinstance(b, dict) and b.get("type") == "input_image"
+                        and isinstance(b.get("image_url"), str)
+                        and b["image_url"].startswith("/")):
+                    refs.append({"path": b["image_url"]})
             if role == "user":
                 stripped = text.lstrip()
                 if _is_injected(stripped):
                     text = ""   # boilerplate/injected — keep the image, drop the text
-                if (text.strip()) or media:
+                if (text.strip()) or media or refs:
                     msg = {"role": "user", "text": text}
                     if media:
                         msg["media"] = media
+                    if refs:
+                        msg["media_refs"] = refs
                     messages.append(msg)
                     saw_user = True
             elif role == "assistant" and text.strip():
-                messages.append({"role": "assistant", "text": text})
+                messages.append({"role": "assistant", "text": text,
+                                 "phase": payload.get("phase")})
         elif pt == "agent_message":
             text = _content_text(payload.get("content")) or payload.get("message", "")
             if text.strip():
-                messages.append({"role": "assistant", "text": text})
+                messages.append({"role": "assistant", "text": text,
+                                 "phase": payload.get("phase")})
         elif pt == "reasoning":
             summary = "\n".join(s.get("text", "") for s in payload.get("summary") or [])
             if summary.strip():
