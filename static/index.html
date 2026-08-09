@@ -724,6 +724,7 @@ const rel = (t) => {
 let sessions = [], shares = [], stores = [], caps = {}, mode = "list", sel = 0, selPath = null, expanded = null, peekCache = {};
 let srcFilter = "all";
 let _pinnedRecents = null;   // frozen recents order — stable while you use the palette
+let _scrollFilesFor = null;   // path whose file chips we should scroll to once they render
 function refreshPins() { _pinnedRecents = null; }   // next visible() recomputes
 let TERMS = [];
 const I_TERM = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.2" y="2" width="11.6" height="10" rx="2"/><path d="M3.6 5.4 5.8 7.2 3.6 9M6.8 9.4h3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -974,8 +975,7 @@ function renderList() {
   const cur = list.querySelector(".row.sel");
   if (cur && _wantScroll) cur.scrollIntoView({block: "nearest"});
   _wantScroll = false;
-  const expNow = vis.find((x) => x.path === expanded);
-  if (expNow) scrollToFilesIfWanted(expNow);
+  scrollToFilesIfWanted();
 }
 
 /* one delegated listener — survives every re-render, no stale handlers */
@@ -993,9 +993,9 @@ $("#list").addEventListener("click", (ev) => {
   const filesBtn = t.closest("[data-files]");
   if (filesBtn) {   // amber count pill -> expand + jump to files (never collapse)
     hideTip();
-    s._scrollFiles = true;
+    _scrollFilesFor = s.path;
     if (expanded !== s.path) { _wantScroll = true; toggle(s); }
-    else scrollToFilesIfWanted(s);
+    else scrollToFilesIfWanted();
     return;
   }
   const msgIcon = t.closest("[data-msg]");
@@ -1242,10 +1242,10 @@ async function fetchPeek(s) {
   catch { peekCache[s.path] = {messages: [{role: "assistant", text: "unreadable"}], artifacts: []}; }
 }
 
-function scrollToFilesIfWanted(sess) {
-  if (!sess || !sess._scrollFiles) return;
+function scrollToFilesIfWanted() {
+  if (!_scrollFilesFor || _scrollFilesFor !== expanded) return;   // only the intended, still-open row
   const arts = $("#list") && $("#list").querySelector(".row.exp .arts");
-  if (arts) { arts.scrollIntoView({block: "nearest"}); sess._scrollFiles = false; }
+  if (arts) { arts.scrollIntoView({block: "nearest"}); _scrollFilesFor = null; }
 }
 function scrollChatEnd() {
   const pk = $("#list")?.querySelector(".card .peek");
@@ -1254,6 +1254,7 @@ function scrollChatEnd() {
 async function toggle(s) {
   if (!s) return;
   expanded = expanded === s.path ? null : s.path;
+  if (_scrollFilesFor && _scrollFilesFor !== expanded) _scrollFilesFor = null;   // stale target
   if (expanded) noteRecent(s.path);         // opening a session counts as recent
   _wantScroll = true;
   render();
