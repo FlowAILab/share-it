@@ -353,13 +353,13 @@ async function sendResult(s, textOnly) {
                               {html: d.html, markdown: d.answer, images: []});
     if (ackP) {
       if (ackFailed(await ackP)) return toast("Clipboard write failed — try again");
-      let msg = n ? `Result + ${n} file${n > 1 ? "s" : ""} copied · apps take the message or the files (⌥⌘R: message only)`
-                  : "Result message copied";
+      let msg = n ? `Copied: last message + ${n} file${n > 1 ? "s" : ""}`
+                  : "Copied: last message";
       if (d.skipped?.length) msg += ` · ${d.skipped.length} missing skipped`;
       toast(msg);
     } else {
       if (!(await copyText(d.answer))) return;
-      toast(n ? "Result copied (browser mode: message only — files via ⇧⌘C)" : "Result message copied");
+      toast("Copied: last message" + (n ? " (browser mode — files via ⇧⌘C)" : ""));
     }
     flashCopied(s.path);
   } catch (e) { toast(e.message); }
@@ -819,6 +819,7 @@ $("#list").addEventListener("click", (ev) => {
   if (t.closest("#resume")) return void doResume(s);
   if (t.closest("#act-context")) return void copyContext(s);
   if (t.closest("#act-share")) return void doShare(s);
+  if (t.closest("#act-msg")) return void sendResult(s, true);
   if (t.closest("#act-result")) return void sendResult(s);
   const openBtn = t.closest("[data-open]");
   if (openBtn) { api("/api/open_url", {url: openBtn.dataset.open}).catch((e) => toast(e.message)); return; }
@@ -958,7 +959,9 @@ function cardHtml(s) {
     <button class="actbtn" id="act-share"
       title="same context as a hosted link for an agent on another device · expiry ${EXPIRY_LABELS[opts.expiry] || "∞"} (change in ⌘K)">Share link <span class="dimlbl">${EXPIRY_LABELS[opts.expiry] || "∞"}</span>${kbd("⌘L")}</button>
     <button class="actbtn" id="act-result"
-      title="last completed answer as a rich message + the deliverable files — for Slack, email, LinkedIn">Send result${kbd("⌘R")}</button>
+      title="last answer + the deliverable files in one copy — file-aware apps (Gmail, terminals, Finder) take the FILES; text fields get the message">Send result${kbd("⌘R")}</button>
+    <button class="actbtn" id="act-msg"
+      title="last answer as a message only — pastes as text everywhere (Gmail, Codex, Slack, anywhere)">msg${kbd("⌥⌘R")}</button>
     ${openTarget ? `<button class="actbtn" id="resume"
       title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>${openTarget}</button>` : ""}
     ${opts.deep ? '<span class="chip-deep" title="deep mode: full tool output + reasoning ship (⌘D toggles)">deep</span>' : ""}

@@ -317,10 +317,23 @@ def render_transcript(session, messages, deep=False, remote=False,
         raw = body.encode("utf-8")[:max(global_cap, 0)]
         body = raw.decode("utf-8", "ignore")
     if remote:
-        # transcript bodies inevitably contain paths the agent typed; hosted
-        # copies at least must not leak the username — home prefix becomes ~
-        body = body.replace(os.path.expanduser("~"), "~")
+        body = _scrub_host_identity(body)
     return body, meta
+
+
+def _scrub_host_identity(text):
+    """Hosted copies must not leak the username. Three forms escape a naive
+    home-prefix replace (found by a live cross-agent probe): the literal
+    /Users/<u> prefix, Claude's slug encoding -Users-<u>-, and the bare
+    username in tool output (ls -la, tmp paths)."""
+    home = os.path.expanduser("~")
+    user = os.path.basename(home)
+    text = text.replace(home, "~")
+    text = text.replace(home.replace(os.sep, "-"), "~")     # -Users-<u> slugs
+    if len(user) >= 4:   # short/common names would corrupt transcript words
+        text = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(user)}(?![A-Za-z0-9_])",
+                      "~user", text)
+    return text
 
 
 def _media_lines(msg):

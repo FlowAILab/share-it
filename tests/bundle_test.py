@@ -141,9 +141,17 @@ home_msgs = [{"role": "user", "text": "t"},
              {"role": "tool", "name": "Bash",
               "input": '{"command": "cat ' + _os.path.expanduser("~") + '/notes.txt"}',
               "output": "from " + _os.path.expanduser("~") + "/notes.txt", "ok": True}]
+home_msgs[1]["output"] += ("\nls: -rw-r--r-- 1 " + _os.path.basename(_os.path.expanduser("~"))
+                           + " staff 12 x.txt\n/private/tmp/x/"
+                           + _os.path.expanduser("~").replace("/", "-") + "-poc/y.txt")
 rb, _ = bundle.render_transcript(SESSION, home_msgs, remote=True)
 lb, _ = bundle.render_transcript(SESSION, home_msgs, remote=False)
+_user = _os.path.basename(_os.path.expanduser("~"))
 ck("remote body: home prefix → ~", _os.path.expanduser("~") not in rb and "~/notes.txt" in rb)
+ck("remote body: -Users-<u> slug scrubbed",
+   _os.path.expanduser("~").replace("/", "-") not in rb)
+ck("remote body: bare username scrubbed (ls output)",
+   len(_user) < 4 or (" " + _user + " staff") not in rb)
 ck("local body keeps real home path", _os.path.expanduser("~") + "/notes.txt" in lb)
 
 # ---- media refs: sniff + unavailability markers -----------------------------

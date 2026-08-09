@@ -48,3 +48,26 @@ proposal in GitHub Discussions); (d) INJECTION REFUSAL — identified embedded
 
 ## Layers 5–6 — real app + cross-agent
 (manual pending — app builds; browser+native flows to run)
+
+## Round 2 (post-ship user testing)
+
+### Send result fix (real Sanju session)
+- Root cause of "message not coming" in Gmail/Codex: file items expose the
+  legacy NSFilenamesPboardType — terminal-class targets paste PATHS,
+  attachment-class targets grab FILES; the message only survives in text-first
+  targets. Verified headlessly with the real payload.
+- Fix: message-only is now first-class — `msg` button in the action row +
+  ⌥⌘R. Probed both variants with the real answer: msg-only = 1 item, NO
+  terminal-paths type (text pastes everywhere incl. Gmail/Codex); ⌘R = 3 items
+  (message + 2 files). Toasts: "Copied: last message + 2 files" / "Copied:
+  last message".
+
+### Link cross-agent acceptance (Sanju session, fresh agent, URL only)
+- Agent barred from local /Users paths; fetched the share URL, downloaded BOTH
+  artifacts (svg 1,432B, spec 1,740B) + all 3 screenshots (PNG 1672×1358),
+  reconstructed the session faithfully (Double Ground label, S̄C macron
+  iterations, interrupted Gmail draft), named the correct next action. PASS.
+- The probe CAUGHT a real leak: username via -Users-<u> slug (47×) and bare
+  `ls` output (62×). Fixed: _scrub_host_identity covers home prefix, slug
+  form, and word-boundary bare username; re-shared → 0 occurrences live;
+  both test shares deleted. Regression tests added for all three forms.
