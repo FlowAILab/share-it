@@ -114,7 +114,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let ready = (try? String(contentsOfFile: readyPath(), encoding: .utf8))?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if ready == readyNonce {
-                webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
+                // ignore any cached copy — a stale page means a stale UI after updates
+                webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!,
+                                        cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
+                                        timeoutInterval: 30))
                 showPanel()
             } else if left > 0 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { poll(left - 1) }

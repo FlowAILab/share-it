@@ -230,6 +230,8 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--dim); }
 #menu hr, .menu-pop hr { border: none; border-top: 1px solid var(--hair); margin: 4px 6px; }
 .dots { flex: none; visibility: hidden; }
 .row.sel .dots, .row:hover .dots { visibility: visible; }
+.rowmsg { visibility: hidden; opacity: 0.85; }
+.row.sel .rowmsg, .row:hover .rowmsg { visibility: visible; }
 #toast {
   position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(8px);
   background: var(--fill-hi); color: var(--ink); border: 1px solid var(--hair);
@@ -698,13 +700,15 @@ function flashCopied(key) {
 
 function shareBtnHtml(s) {
   const st = s._share;
+  const msgBtn = `<button class="rowshare rowmsg" data-msg="1"
+    title="copy the last answer as a message — pastes as text anywhere (⌥⌘R)">msg</button>`;
   if (st === "busy") return '<button class="rowshare" disabled>…</button>';
   if (st && st.url) {
     const fresh = lastCopied === s.path;
-    return `<button class="rowshare${fresh ? " done" : ""}" data-copy="${esc(st.url)}" title="already shared — click to copy the link">${fresh ? "copied ✓" : "copy link"}</button>`;
+    return `${msgBtn}<button class="rowshare${fresh ? " done" : ""}" data-copy="${esc(st.url)}" title="already shared — click to copy the link">${fresh ? "copied ✓" : "copy link"}</button>`;
   }
   const fresh = lastCopied === s.path;
-  return `<button class="rowshare${fresh ? " done" : ""}" data-ctx="1"
+  return `${msgBtn}<button class="rowshare${fresh ? " done" : ""}" data-ctx="1"
     title="copy this session's context for another agent">${fresh ? "copied ✓" : "copy <kbd>⏎</kbd>"}</button>`;
 }
 
@@ -748,7 +752,7 @@ function renderList() {
        if (!IS_NATIVE) return `<kbd>⏎</kbd> copy context · click buttons for the rest`;
        const ex = vis.find((x) => x.path === expanded);
        if (ex?._sel?.size) return `<kbd>⏎</kbd> copy context · <kbd>⇧⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌘R</kbd> send result`;
-       return `<kbd>⏎</kbd> copy context · <kbd>⌘L</kbd> share link · <kbd>⌘R</kbd> send result · <kbd>⌘K</kbd> more`;
+       return `<kbd>⏎</kbd> copy context · <kbd>⌘L</kbd> share link · <kbd>⌘R</kbd> result+files · <kbd>⌥⌘R</kbd> msg · <kbd>⌘K</kbd> more`;
      })()}</span>`;
   const lnk = list.querySelector("#lnk[data-fresh]");
   if (lnk) {  // highlight once, right after creation — not on every re-render
@@ -772,7 +776,8 @@ $("#list").addEventListener("click", (ev) => {
   const t = ev.target;
   const rowBtn = t.closest(".rowshare");
   if (rowBtn) {
-    if (rowBtn.dataset.copy) { copyText(rowBtn.dataset.copy).then((ok) => ok && flashCopied(s.path)); }
+    if (rowBtn.dataset.msg) sendResult(s, true);   // msg = last answer as text
+    else if (rowBtn.dataset.copy) { copyText(rowBtn.dataset.copy).then((ok) => ok && flashCopied(s.path)); }
     else copyContext(s);   // row button = the primary verb, same as ⏎
     return;
   }
