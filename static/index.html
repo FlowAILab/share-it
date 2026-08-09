@@ -358,7 +358,7 @@ async function sendResult(s, textOnly) {
       if (d.skipped?.length) msg += ` · ${d.skipped.length} missing skipped`;
       toast(msg);
     } else {
-      await copyText(d.answer);
+      if (!(await copyText(d.answer))) return;
       toast(n ? "Result copied (browser mode: message only — files via ⇧⌘C)" : "Result message copied");
     }
     flashCopied(s.path);
@@ -438,8 +438,10 @@ async function copyFilesOnly(s, fp) {
   if (ackP) {
     if (ackFailed(await ackP)) return toast("Clipboard write failed — try again");
   } else {
-    try { await api("/api/file/copy", {path: s.path, files: fp}); }
-    catch (e) { return toast(e.message); }
+    try {
+      const d = await api("/api/file/copy", {path: s.path, files: fp});
+      if (!d.ok) return toast("Clipboard write failed — try again");
+    } catch (e) { return toast(e.message); }
   }
   toast(`Copied ${fp.length} file${fp.length > 1 ? "s" : ""} — paste anywhere`);
 }
@@ -1024,7 +1026,7 @@ async function doResume(s) {
     const d = await api("/api/resume", {path: s.path});
     if (d.app) toast("Opening in " + (d.target || "the app"));
     else if (d.launched) toast("Opened in Terminal");
-    else { await copyText(d.command); toast("Command copied — paste in your terminal"); }
+    else if (await copyText(d.command)) toast("Command copied — paste in your terminal");
   } catch (e) { toast(e.message); }
 }
 

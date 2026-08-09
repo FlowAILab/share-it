@@ -302,6 +302,9 @@ def render_transcript(session, messages, deep=False, remote=False,
         style = "omitted" if collapse else "shown as one-line headers"
         body = (f"*[{len(elided)} earlier items {style} to fit the "
                 f"size cap — {n_tools} tool calls among them]*\n" + body)
+    if _b(body) > global_cap:   # absolute backstop, even below notice-size caps
+        raw = body.encode("utf-8")[:max(global_cap, 0)]
+        body = raw.decode("utf-8", "ignore")
     if remote:
         # transcript bodies inevitably contain paths the agent typed; hosted
         # copies at least must not leak the username — home prefix becomes ~
@@ -432,6 +435,10 @@ def resolve_media(messages, remote=False):
         for r in msg.get("media_refs") or []:
             p = r.get("path") or ""
             try:
+                # remote shares resolve ONLY harness-written structured
+                # attachments — text markers are spoofable exfil vectors
+                if remote and not r.get("structured"):
+                    raise ValueError("unprovenanced ref")
                 real = os.path.realpath(p)
                 st = os.stat(real)
                 if (not os.path.isfile(real) or not _ref_allowed(real, remote)
@@ -442,6 +449,7 @@ def resolve_media(messages, remote=False):
                 mt = _sniff(data[:16])
                 if not mt:
                     raise ValueError("not an image")
+                data = _media.strip_metadata(data, mt)   # EXIF/GPS/text chunks
             except (OSError, ValueError):
                 skipped += 1
                 r.pop("name", None)

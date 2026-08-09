@@ -242,7 +242,10 @@ def parse_codex(path):
         pt = payload.get("type")
         if pt == "message":
             raw_text = _content_text(payload.get("content"))
-            refs = [{"path": p} for p in _IMAGE_SRC.findall(raw_text)
+            # text markers are model/user-authored → spoofable; they carry NO
+            # provenance and may only be resolved for LOCAL bundles
+            refs = [{"path": p, "structured": False}
+                    for p in _IMAGE_SRC.findall(raw_text)
                     if isinstance(p, str) and p.startswith("/")]
             text = _IMAGE_MARKER.sub("", raw_text)
             role = payload.get("role")
@@ -251,11 +254,13 @@ def parse_codex(path):
                 for b in (payload.get("content") or [])
                 if isinstance(b, dict) and b.get("type") == "input_image"
             ) if m]
-            for b in (payload.get("content") or []):   # file-path attachments
+            for b in (payload.get("content") or []):
+                # structured input_image blocks are harness-written attachments
+                # — the only refs a REMOTE share may resolve
                 if (isinstance(b, dict) and b.get("type") == "input_image"
                         and isinstance(b.get("image_url"), str)
                         and b["image_url"].startswith("/")):
-                    refs.append({"path": b["image_url"]})
+                    refs.append({"path": b["image_url"], "structured": True})
             if role == "user":
                 stripped = text.lstrip()
                 if _is_injected(stripped):
@@ -854,6 +859,25 @@ def _codex_sqlite_index():
                     {"model": model or "", "tokens": tokens or 0, "branch": branch or ""})
         if index:
             break
+    # session_index.jsonl carries the freshest ChatGPT-generated thread names
+    # (the exact sidebar titles); overlay them by thread id where present
+    names = {}
+    try:
+        with open(os.path.join(_CODEX_HOME, "session_index.jsonl"), errors="ignore") as fh:
+            for line in fh:
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(o, dict) and o.get("id") and o.get("thread_name"):
+                    names[o["id"]] = o["thread_name"]   # last write wins
+    except OSError:
+        pass
+    if names:
+        for rp, (title, cwd, sub, extra) in list(index.items()):
+            tid = _codex_thread_of(rp)
+            if tid in names:
+                index[rp] = (names[tid], cwd, sub, extra)
     return index
 
 
@@ -966,6 +990,15 @@ def scan_sessions(cache):
                 ent = cache.get(key)
                 if (ent and ent["mtime"] == st.st_mtime and ent["size"] == st.st_size
                         and ent.get("v") == SCHEMA_VERSION):
+                    # Codex names threads AFTER the rollout stops changing — the
+                    # official title lands in its DB without touching the file,
+                    # so cached entries refresh their title from the live index
+                    if source == "codex":
+                        hit = codex_idx.get(os.path.realpath(path))
+                        if hit and hit[0]:
+                            fresh = " ".join(hit[0].split())[:120]
+                            if fresh and fresh != ent["title"]:
+                                ent["title"] = fresh
                     ent["app"] = _app_for(ent, cowork_ids)
                     sessions.append(ent)
                     if source == "claude" and not rescue:

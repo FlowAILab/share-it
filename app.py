@@ -280,7 +280,9 @@ def _artifact_fingerprint(session, opts):
     or ANY edit (even one that restores size+mtime) changes it, so a stale
     bundle can never be served as cached. Files are <=25MB, so full hashing is
     cheap; ValueError (missing/oversize pick) propagates rather than aliasing
-    a broken selection to a chat-only cache hit."""
+    a broken selection to a chat-only cache hit. File-backed media refs are
+    fingerprinted too (path+size+mtime): replacing an externally referenced
+    image must invalidate the cached bundle."""
     import hashlib
     pool = _effective_files(session, opts)
     parts = []
@@ -293,6 +295,18 @@ def _artifact_fingerprint(session, opts):
             parts.append(f"{a['path']}:{h.hexdigest()}")
         except OSError:
             parts.append(f"{a['path']}:missing")
+    try:
+        msgs = adapters.by_id(session["source"]).parse(session["path"])
+        for m in msgs:
+            for r in m.get("media_refs") or []:
+                p = r.get("path") or ""
+                try:
+                    st = os.stat(p)
+                    parts.append(f"ref:{p}:{st.st_size}:{round(st.st_mtime, 3)}")
+                except OSError:
+                    parts.append(f"ref:{p}:missing")
+    except Exception:
+        pass
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
 
 
@@ -735,7 +749,8 @@ class Handler(BaseHTTPRequestHandler):
                                            "cached": True, "provider": cached["provider"],
                                            "expires": cached["expires"], "card": card,
                                            "n_files": cached.get("n_files", 0),
-                                           "n_images": cached.get("n_images", 0)})
+                                           "n_images": cached.get("n_images", 0),
+                                           "images_skipped": cached.get("images_skipped", 0)})
                 (session, messages, media_objs, fobjs, artifact_links,
                  index_name, card, shared_paths, stats, reads,
                  media_skipped) = _assemble_bundle(path, opts)
@@ -770,7 +785,8 @@ class Handler(BaseHTTPRequestHandler):
             entry = share.record_share(session, result, opts, len(doc),
                                        file_paths=shared_paths, src_mtime=pre_mtime,
                                        counts={"n_files": len(shared_paths),
-                                               "n_images": len(media_objs)})
+                                               "n_images": len(media_objs),
+                                               "images_skipped": media_skipped})
             return self._json({"url": entry["url"], "size": len(doc), "card": card,
                                "provider": entry["provider"], "expires": entry["expires"],
                                "n_files": len(shared_paths), "n_images": len(media_objs),
