@@ -330,11 +330,11 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--dim); }
     <span class="mag"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.6 10.6 14 14"/></svg></span>
     <input id="q" placeholder="Search sessions and messages…" autocomplete="off" spellcheck="false">
     <button id="q-clear" aria-label="clear search">✕</button>
-    <button class="iconbtn" id="btn-shares" data-tip="Shared links">↗</button>
+    <button class="iconbtn" id="btn-shares" data-tip="Manage shared links" aria-label="Manage shared links"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6.7 9.3l2.6-2.6"/><path d="M5.9 6.9 4.5 8.3a2.62 2.62 0 1 0 3.7 3.7l1.4-1.4"/><path d="M10.1 9.1l1.4-1.4a2.62 2.62 0 1 0-3.7-3.7L6.4 5.4"/></svg></button>
   </div>
   <div id="opts" class="ctl"></div>
   <div id="hr"></div>
-  <div id="list"></div>
+  <div id="list" role="listbox" aria-label="sessions"></div>
   <div id="foot"></div>
 </div>
 
@@ -489,7 +489,12 @@ window.__menuCopy = smartCopy;
 
 /* ---------- unified action menu (⌘K · right-click · •••) ---------- */
 let menu = null;  // {items, sel, s}
-function closeMenu() { menu = null; $("#menu")?.remove(); $("#submenu")?.remove(); }
+let _menuOpener = null;
+function closeMenu() {
+  menu = null; $("#menu")?.remove(); $("#submenu")?.remove();
+  if (_menuOpener?.isConnected) _menuOpener.focus({preventScroll: true});
+  _menuOpener = null;
+}
 
 const EXPIRY_LABELS = {0: "∞", 24: "1d", 72: "3d", 168: "7d"};
 function toggleDeep() {
@@ -611,7 +616,9 @@ function placeMenu(el, x, y, anchorRight) {
 }
 
 function openMenu(s, x, y, anchorRight) {
+  _menuOpener = document.activeElement;
   closeMenu();
+  _menuOpener = document.activeElement;   // closeMenu cleared it — recapture
   const items = menuItemsFor(s);
   if (!items.length) return;
   menu = {items, sel: items.findIndex((i) => !i.sep && !i.hdr), s, sub: null};
@@ -830,7 +837,7 @@ function renderOpts() {
   if (mode === "shares") {
     $("#opts").style.display = "";
     $("#opts").innerHTML = `<span class="share-meta" style="margin-right:4px">shared links</span>
-      ${[["all", "all"], ["chats", "chats"], ["files", "files"], ["expiring", "expiring"]].map(([v, l]) =>
+      ${[["all", "all"], ["chats", "chats"], ["files", "files"], ["expiring", "expiring"], ["expired", "expired"]].map(([v, l]) =>
         `<span role="button" tabindex="0" class="tog ${sharesFilter === v ? "on" : ""}" data-sf="${v}">${l}</span>`).join("")}`;
     $("#opts").querySelectorAll("[data-sf]").forEach((el) => el.addEventListener("click", () => {
       sharesFilter = el.dataset.sf; sel = 0; renderOpts(); render();
@@ -945,6 +952,9 @@ function renderList() {
   list.scrollTop = keepScroll;
   const cur = list.querySelector(".row.sel");
   if (cur) cur.scrollIntoView({block: "nearest"});
+  // card bottom must be reachable — sticky row-line keeps identity pinned
+  const card = list.querySelector(".row.exp .card");
+  if (card) card.scrollIntoView({block: "nearest"});
 }
 
 /* one delegated listener — survives every re-render, no stale handlers */
@@ -1389,10 +1399,10 @@ async function refresh() {
 const pendingDeletes = {};
 function visibleShares() {
   const q = $("#q").value.toLowerCase().split(/\s+/).filter(Boolean);
-  const isGone = (s) => s.deleted
-    || (s.expires != null && (s.expires - Date.now()/1000) <= 0);
-  return shares.filter((s) => !isGone(s)
-    && (sharesFilter === "all"
+  const isExpired = (s) => s.expires != null && (s.expires - Date.now()/1000) <= 0;
+  return shares.filter((s) => !s.deleted
+    && (sharesFilter === "expired" ? isExpired(s) : !isExpired(s))
+    && (sharesFilter === "all" || sharesFilter === "expired"
         || (sharesFilter === "files" && s.artifact)
         || (sharesFilter === "chats" && !s.artifact)
         || (sharesFilter === "expiring" && s.expires != null))
@@ -1552,7 +1562,7 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
-  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".seg span, .tog, .copychip, .morechips, .art")) {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".seg span, .tog, .copychip, .morechips, .art, .srcf, .chk, .older, .glyph.canopen")) {
     e.preventDefault(); e.target.click(); return;
   }
   if (mode === "shares") {
