@@ -65,8 +65,9 @@ body.browser #panel {
 #opts { padding: 0 18px 10px; }
 /* row accessory overlay — never in normal flow, never reserves space */
 .acc { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  display: none; align-items: center; gap: 2px; }
-.row.sel .acc, .row-line:hover .acc { display: inline-flex; }
+  display: inline-flex; align-items: center; gap: 2px;
+  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.1s ease-out; }
+.row.sel .acc, .row-line:hover .acc { opacity: 1; visibility: visible; pointer-events: auto; }
 .row.sel .m, .row-line:hover .m { opacity: 0; }
 .row .m { transition: opacity 0.1s ease-out; }
 .row.sel .t, .row-line:hover .t { padding-right: 148px; }
@@ -87,8 +88,8 @@ body.browser #panel {
 #list { flex: 1; overflow-y: auto; padding: 6px 8px; }
 #list::-webkit-scrollbar { width: 0; }
 .row { border-radius: 9px; cursor: default; }
-.row.exp > .row-line { position: sticky; top: -6px; z-index: 4;
-  background: #1d1d22; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+.row.exp > .row-line, .row.exp.sel > .row-line { position: sticky; top: -6px; z-index: 4;
+  background: #232329 !important; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
 .row-line { cursor: pointer; }
 .disc { flex: none; width: 8px; color: rgba(255,255,255,0.35); font-size: 10px;
   transition: transform 0.12s; }
@@ -186,10 +187,14 @@ body.browser #panel {
 .row .snip b { color: var(--ink); font-weight: 600; }
 .arts { gap: 5px 6px; }
 .art {
-  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
-  font-size: 11.5px; padding: 3px 9px; border-radius: 7px;
-  border: 1px solid var(--hair); color: var(--dim);
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11.5px; border-radius: 7px;
+  border: 1px solid var(--hair); color: var(--dim); overflow: hidden;
 }
+.art .artbody { background: none; border: none; color: inherit; cursor: pointer;
+  font: inherit; display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px 3px 4px; }
+.art .artbody:hover { color: var(--ink); }
+.art .chk:focus-visible, .art .artbody:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 .art .fico { display: inline-flex; opacity: 0.75; margin-right: 1px; }
 .art .fico svg { display: block; }
 kbd.ghostkey { color: var(--dim); margin-left: 4px; }
@@ -225,7 +230,7 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
   padding: 3px 4px 6px; }
 .peek .older:hover { color: rgba(255,255,255,0.9); }
 .peek .msg.open span { white-space: normal; overflow: visible; text-overflow: unset; }
-.openopts { display: flex; gap: 6px; justify-content: flex-end; }
+.openopts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 .openopts .actbtn svg { width: 13px; height: 13px; }
 .cardfoot { display: flex; align-items: center; }
 .cardfoot .openin-wrap { margin-left: auto; }
@@ -256,9 +261,10 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .chip-deep { font: 600 10px ui-monospace, Menlo, monospace; color: #e8b34c;
   border: 1px solid rgba(232,179,76,0.45); border-radius: 6px; padding: 2px 7px;
   align-self: center; letter-spacing: 0.04em; }
-.art .chk { width: 15px; height: 15px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.28);
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 10px; color: #7fc97f; margin-right: 2px; flex: none; }
+.art .chk { width: 16px; height: 16px; border-radius: 4px; border: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; margin-left: 5px;
+  font-size: 10px; color: #7fc97f; flex: none; background: rgba(255,255,255,0.08);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2); }
 .art .chk:hover { border-color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.08); }
 .art .chk.on { border-color: rgba(127,201,127,0.6); background: rgba(127,201,127,0.12); }
 .art:focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
@@ -334,7 +340,7 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--dim); }
   </div>
   <div id="opts" class="ctl"></div>
   <div id="hr"></div>
-  <div id="list" role="listbox" aria-label="sessions"></div>
+  <div id="list" role="list" aria-label="sessions and shared links"></div>
   <div id="foot"></div>
 </div>
 
@@ -600,7 +606,7 @@ async function copySession(s, modeOverride, extraFiles) {  // legacy export path
 function menuHTML(items, selIdx) {
   return items.map((i, idx) => i.sep ? '<hr role="separator">'
     : i.hdr ? `<div class="mhdr">${esc(i.hdr)}</div>`
-    : `<div class="mi${idx === selIdx ? " sel" : ""}${i.sub ? " has-sub" : ""}" role="menuitem" tabindex="-1"`
+    : `<div class="mi${idx === selIdx ? " sel" : ""}${i.sub ? " has-sub" : ""}" role="menuitem" tabindex="0"`
       + ` aria-haspopup="${i.sub ? "menu" : "false"}" data-mi="${idx}">`
       + `${i.ic || ""}${esc(i.t)}${i.sub ? '<span class="chev">›</span>' : i.k ? `<kbd>${i.k}</kbd>` : ""}</div>`).join("");
 }
@@ -616,17 +622,26 @@ function placeMenu(el, x, y, anchorRight) {
 }
 
 function openMenu(s, x, y, anchorRight) {
-  _menuOpener = document.activeElement;
+  const opener = document.activeElement;
   closeMenu();
-  _menuOpener = document.activeElement;   // closeMenu cleared it — recapture
+  _menuOpener = opener;
   const items = menuItemsFor(s);
   if (!items.length) return;
   menu = {items, sel: items.findIndex((i) => !i.sep && !i.hdr), s, sub: null};
   const el = document.createElement("div");
-  el.id = "menu"; el.setAttribute("role", "menu");
+  el.id = "menu"; el.setAttribute("role", "menu"); el.tabIndex = -1;
   el.innerHTML = menuHTML(items, menu.sel);
   document.body.appendChild(el);
   placeMenu(el, x, y, anchorRight);
+  el.querySelector(".mi.sel")?.focus?.();
+  el.addEventListener("keydown", (ev) => {
+    const mis = [...el.querySelectorAll(".mi")];
+    const cur = mis.indexOf(document.activeElement);
+    if (ev.key === "ArrowDown") { ev.preventDefault(); mis[Math.min(cur + 1, mis.length - 1)]?.focus(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); mis[Math.max(cur - 1, 0)]?.focus(); }
+    else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); document.activeElement?.click(); }
+    else if (ev.key === "Escape" || ev.key === "Tab") { ev.preventDefault(); closeMenu(); }
+  });
   el.addEventListener("mouseover", (ev) => {
     const mi = ev.target.closest("[data-mi]");
     if (mi) { menu.sel = +mi.dataset.mi; syncMenuSel(); }
@@ -798,34 +813,36 @@ function visible() {
   return vis;
 }
 
-let searching = false;
+let searching = false, _searchGen = 0;
 function queueSearch() {
   clearTimeout(searchTimer);
   const q = $("#q").value.trim();
-  sessions.forEach((x) => { x._snippet = null; });   // never show a stale snippet
-  if (q.length < 2) { contentHits = []; searching = false; return; }
+  const gen = ++_searchGen;
+  sessions.forEach((x) => { x._snippet = null; });
+  contentHits = [];   // synchronously drop old body matches the moment you type
+  if (q.length < 2) { searching = false; return; }
   searching = true;
   searchTimer = setTimeout(async () => {
     try {
       const hits = (await api("/api/search?q=" + encodeURIComponent(q))).results;
-      if ($("#q").value.trim() !== q) return;  // stale response for an older query
+      if (gen !== _searchGen) return;   // a newer query superseded this one
       contentHits = hits;
-    } catch { contentHits = []; }
-    searching = false;
-    render();
+    } catch { if (gen === _searchGen) contentHits = []; }
+    if (gen === _searchGen) { searching = false; render(); }
   }, 180);
 }
 
 let _navTs = 0;   // last keyboard-nav moment — hover yields to the keyboard
-function moveSel() {
+let _wantScroll = false;  // scroll the list only on explicit expand/keyboard, never on hover/async render
+function moveSel(doScroll) {
   const list = $("#list");
   list.querySelectorAll(".row.sel").forEach((r) => {
-    r.classList.remove("sel"); r.setAttribute("aria-selected", "false");
+    r.classList.remove("sel");
   });
   const row = list.querySelector(`.row[data-i="${sel}"]`);
   if (row) {
-    row.classList.add("sel"); row.setAttribute("aria-selected", "true");
-    row.scrollIntoView({block: "nearest"});
+    row.classList.add("sel");
+    if (doScroll) row.scrollIntoView({block: "nearest"});
   }
 }
 function render() {
@@ -903,7 +920,7 @@ function renderList() {
   let msgHdrDone = false;
   list.innerHTML = vis.length ? vis.map((s, i) => `${(query && s._contentOnly && !msgHdrDone && (msgHdrDone = true))
       ? '<div class="mhdr" style="padding:8px 12px 3px">message matches</div>' : ""}
-    <div class="row${i === sel ? " sel" : ""}${expanded === s.path ? " exp" : ""}" role="option" aria-selected="${i === sel}" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
+    <div class="row${i === sel ? " sel" : ""}${expanded === s.path ? " exp" : ""}" role="listitem" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
       <div class="row-line">
         <span class="disc">›</span><span class="glyph${openTargetFor(s) ? " canopen" : ""}" ${openTargetFor(s)
           ? `role="button" tabindex="0" data-resume="1" data-tip="Open in ${esc(openTargetFor(s))}|⌥⏎"`
@@ -951,10 +968,8 @@ function renderList() {
   }
   list.scrollTop = keepScroll;
   const cur = list.querySelector(".row.sel");
-  if (cur) cur.scrollIntoView({block: "nearest"});
-  // card bottom must be reachable — sticky row-line keeps identity pinned
-  const card = list.querySelector(".row.exp .card");
-  if (card) card.scrollIntoView({block: "nearest"});
+  if (cur && _wantScroll) cur.scrollIntoView({block: "nearest"});
+  _wantScroll = false;
 }
 
 /* one delegated listener — survives every re-render, no stale handlers */
@@ -1035,39 +1050,9 @@ $("#list").addEventListener("click", (ev) => {
     s._openOpts = false; render();
     return;
   }
-  if (t.closest("#openin-caret2")) { t.closest("#openin-caret2").id = "openin-caret"; }
-  if (t.closest("#openin-caret")) {
+  if (t.closest("#openin-caret2") || t.closest("#openin-caret")) {
     s._openOpts = !s._openOpts; render(); return;
   }
-  if (false) {
-    const r = t.closest("#openin-caret").getBoundingClientRect();
-    closeMenu();
-    const dir = (target, label) => () =>
-      api("/api/open_dir", {path: s.path, target})
-        .then((d) => toast(d.ok ? `Opened in ${label}` : "Couldn't open folder"))
-        .catch((e) => toast(e.message));
-    menu = {items: [
-      ...(openTargetFor(s) ? [{t: `Open in ${openTargetFor(s)}`, k: "⌥⏎",
-        ic: `<span class="mic">${appLogo(s)}</span>`, run: () => doResume(s)}] : []),
-      {t: "Folder in Finder", ic: `<span class="mic">${I_FOLDER}</span>`, run: dir("finder", "Finder")},
-      ...TERMS.map((tm) => ({t: `Folder in ${tm.label}`,
-        ic: `<span class="mic">${I_TERM}</span>`, run: dir(tm.name, tm.label)})),
-    ], sel: 0, s, sub: null};
-    const el = document.createElement("div");
-    el.id = "menu"; el.setAttribute("role", "menu");
-    el.innerHTML = menuHTML(menu.items, 0);
-    document.body.appendChild(el);
-    placeMenu(el, r.left, r.bottom + 6);
-    el.addEventListener("click", (ev2) => {
-      const mi = ev2.target.closest("[data-mi]");
-      if (mi) { const it = menu.items[+mi.dataset.mi]; closeMenu(); it.run(); }
-    });
-    return;
-  }
-  if (t.closest("#act-context")) return void copyContext(s);
-  if (t.closest("#act-share")) return void doShare(s);
-  if (t.closest("#act-msg")) return void sendResult(s, true);
-  if (t.closest("#act-result")) return void sendResult(s);
   const openBtn = t.closest("[data-open]");
   if (openBtn) { api("/api/open_url", {url: openBtn.dataset.open}).catch((e) => toast(e.message)); return; }
   const copyBtn = t.closest("[data-copy]");
@@ -1158,7 +1143,9 @@ function cardHtml(s) {
     ? `<div class="older" id="chat-older" role="button" tabindex="0">↑ Show ${older} earlier message${older > 1 ? "s" : ""}</div>` : "";
   const bubbles = p ? expander + shown.map((m, i) =>
     `<div class="msg ${m.role === "user" ? "u" : "a"}${String(s._openMsg) === String(base + i) ? " open" : ""}" data-msgi="${base + i}"><i class="${m.role === "user" ? "" : roleCls}">${who(m)}</i><span>${hi(m.text)}</span></div>`).join("") : "";
-  const lastExtra = (p && p.last && !(p.messages || []).some((m) => m.text === p.last))
+  const norm = (t) => (t || "").replace(/\s+/g, " ").trim();
+  const lastN = norm(p && p.last);
+  const lastExtra = (lastN && !allMsgs.some((m) => norm(m.text) === lastN))
     ? `<div class="msg a last${String(s._openMsg) === "last" ? " open" : ""}" data-msgi="last"><i class="${roleCls}">${appShort(s)}</i><span>${hi(p.last)}</span></div>` : "";
   const peek = !p ? '<div class="peekbox"><div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div></div>'
     : `<div class="peekbox">${chatHdr}<div class="peek">${(bubbles + lastExtra)
@@ -1170,9 +1157,10 @@ function cardHtml(s) {
     const mark = st === "busy" ? "…" : lastCopied === a.path ? "✓" : "";
     const kindWord = {"a-new": "created", "a-mod": "modified", "a-ref": "read (referenced)"}[cls];
     const tip = `${kindWord}${a.size != null ? ` · ${fmtSize(a.size)}` : ""} — click to preview`;
-    return `<span class="art ${cls}${on ? " picked" : ""}" role="button" tabindex="0" data-art="${esc(a.path)}" data-tip="${esc(tip)}">
-      <span class="chk${on ? " on" : ""}" data-chk="${esc(a.path)}" data-tip="${on ? "Remove from selection" : "Select for copy/share"}">${on ? "✓" : ""}</span>
-      <span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
+    // checkbox + preview are SEPARATE focusable buttons (keyboard-usable)
+    return `<span class="art ${cls}${on ? " picked" : ""}">
+      <button class="chk${on ? " on" : ""}" data-chk="${esc(a.path)}" role="checkbox" aria-checked="${on}" tabindex="0" aria-label="${on ? "Deselect" : "Select"} ${esc(a.name)}" data-tip="${on ? "Remove from selection" : "Select for copy/share"}">${on ? "✓" : ""}</button>
+      <button class="artbody" data-art="${esc(a.path)}" tabindex="0" data-tip="${esc(tip)}"><span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</button></span>`;
   };
   const allChips = p ? [
     ...(p.artifacts || []).filter((a) => a.kind === "created").map((a) => [a, "a-new"]),
@@ -1196,7 +1184,7 @@ function cardHtml(s) {
     ? '<div class="ctl"><span class="share-meta">cataloguing files… (a moment, then reopen)</span></div>' : "";
   const nSel = s._sel.size;
   const nAll = (p?.artifacts || []).length + (p?.reads || []).length;
-  const selHint = nSel ? `<button class="actbtn" id="art-copy">Copy ${nSel > 1 ? nSel + " files" : "file"}${IS_NATIVE ? ' <kbd class="ghostkey">⇧⌘C</kbd>' : ""}</button>` : "";
+  const selHint = nSel ? `<button class="actbtn" id="art-copy">Copy ${nSel > 1 ? nSel + " files" : "file"}${IS_NATIVE ? ' <kbd class="ghostkey">⇧⌘C</kbd>' : ""}</button><button class="actbtn" id="art-go">Share ${nSel > 1 ? "files" : "file"}</button>` : "";
   const arts = groups.length ? `<div class="ctl arts">${groups.join("")}
     ${nAll > 1 ? `<span role="button" tabindex="0" class="tog" id="art-all">${nSel === nAll ? "Clear" : "Select all"}</span>` : ""}
     ${selHint}</div>` : "";
@@ -1253,8 +1241,13 @@ async function toggle(s) {
   if (!s) return;
   expanded = expanded === s.path ? null : s.path;
   if (expanded) noteRecent(s.path);         // opening a session counts as recent
+  _wantScroll = true;
   render();
-  if (expanded) scrollChatEnd();
+  if (expanded) {
+    const row = $("#list").querySelector(".row.exp");
+    row?.scrollIntoView({block: "nearest"});
+    scrollChatEnd();
+  }
   if (expanded && !peekCache[s.path]) {
     await fetchPeek(s);
     if (expanded === s.path) render();
@@ -1385,7 +1378,7 @@ async function refresh() {
     sessions = data.sessions.map((n) => {
       const old = keep.get(n.path);
       if (old && old.mtime !== n.mtime) delete peekCache[n.path];  // transcript grew — preview is stale
-      return old && old.mtime === n.mtime ? Object.assign(n, {_share: old._share, _art: old._art, _sel: old._sel, _selTouched: old._selTouched, _chipsOpen: old._chipsOpen}) : n;
+      return old && old.mtime === n.mtime ? Object.assign(n, {_share: old._share, _art: old._art, _sel: old._sel, _selTouched: old._selTouched, _chipsOpen: old._chipsOpen, _chatAll: old._chatAll, _openMsg: old._openMsg, _openOpts: old._openOpts}) : n;
     });
     stores = data.stores || [];
     if (expanded && !peekCache[expanded]) {  // invalidated above — refetch live
@@ -1420,6 +1413,7 @@ function renderShares() {
   const expLabel = (s) => {
     if (s.expires == null) return "no expiry";
     const d = (s.expires - Date.now()/1000) / 86400;
+    if (d <= 0) return "expired";   // #9: an expired link must never read "expires in…"
     if (d < 1) return "expires in " + Math.max(1, Math.round(d * 24)) + "h";
     if (d < 1.5) return "expires tomorrow";
     return "expires in " + Math.round(d) + "d";
@@ -1441,8 +1435,10 @@ function renderShares() {
         <button class="iconbtn" data-openlink="${esc(s.url)}">open</button>
         ${del}
       </div></div>`;
-  }).join("") : '<div class="empty">no live links</div>';
-  $("#foot").innerHTML = `<span>${live.length} live${nGone ? ` · ${nGone} expired hidden` : ""}</span>
+  }).join("") : `<div class="empty">${sharesFilter === "expired" ? "No expired links"
+    : ($("#q").value ? `No shared links match “${esc($("#q").value)}”` : "No shared links yet")}</div>`;
+  const label = sharesFilter === "expired" ? "expired" : "live";
+  $("#foot").innerHTML = `<span>${live.length} ${label}${(sharesFilter !== "expired" && nGone) ? ` · ${nGone} expired` : ""}</span>
     <span class="grow"></span><span><kbd>⏎</kbd>/<kbd>⌘C</kbd> copy · <kbd>esc</kbd> back</span>`;
 }
 
@@ -1595,7 +1591,7 @@ document.addEventListener("keydown", (e) => {
     _navTs = Date.now();
     sel = e.key === "ArrowDown" ? Math.min(sel + 1, vis.length - 1) : Math.max(sel - 1, 0);
     selPath = vis[sel]?.path;
-    moveSel();   // class flip + scroll only — never rebuilds the DOM
+    moveSel(true);   // class flip + scroll only — never rebuilds the DOM
   }
   else if (e.key === "Enter" && mode === "list") {
     e.preventDefault();  // otherwise the search input beeps
