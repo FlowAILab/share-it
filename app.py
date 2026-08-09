@@ -916,14 +916,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(
                     {"error": "No completed result — the session looks interrupted"}, 409)
             answer = msg["text"]
-            if "files" in body and body.get("files") is None:
-                return self._json({"error": "files must be a list (omit for defaults)"}, 400)
-            files_req = body.get("files")
             skipped = []
             if body.get("message_only"):
-                # ⌥⌘R — the write-up alone; no files, so no 'Attached:' line
+                # ⌥⌘R — the write-up alone; any files field is irrelevant, so
+                # short-circuit before validating it (no attachments claimed)
                 files = []
-            elif files_req is None:
+            elif body.get("files") is None:
+                if "files" in body:
+                    return self._json({"error": "files must be a list (omit for defaults)"}, 400)
                 arts = _session_artifacts(session)
                 files = []
                 # defaults derive from the CHOSEN answer — attachments and
@@ -931,6 +931,7 @@ class Handler(BaseHTTPRequestHandler):
                 for p in _primary_paths(arts, answer[:4000]):
                     (files if os.path.isfile(p) else skipped).append(p)
             else:
+                files_req = body.get("files")
                 if not (isinstance(files_req, list)
                         and all(isinstance(f, str) for f in files_req)):
                     return self._json({"error": "bad files field"}, 400)
@@ -1125,7 +1126,7 @@ _BARE_LOCAL = re.compile(
 # spans the bare-path shortener must NOT touch: fenced/inline code and NETWORK
 # URLs (http/https/ftp). file:// is deliberately excluded — it's local.
 _PROTECT = re.compile(r"```.*?```|`[^`\n]+`|(?:https?|ftp)://\S+", re.DOTALL)
-_ATTACH_TAIL = re.compile(r"\n*📎 Attached:[^\n]*\Z")
+_ATTACH_TAIL = re.compile(r"(?m)^📎 Attached:[^\n]*\Z")   # only a trailing line; no \n* backtracking
 
 
 def _clean_result_message(text, files):
