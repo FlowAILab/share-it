@@ -9,8 +9,8 @@
 /* Monochrome glass palette. Native app supplies vibrancy blur behind a
    transparent body; the browser fallback paints its own dark glass. */
 :root {
-  --ink: rgba(255,255,255,0.92); --dim: rgba(255,255,255,0.55);
-  --faint: rgba(255,255,255,0.32); --hair: rgba(255,255,255,0.1);
+  --ink: rgba(255,255,255,0.92); --dim: rgba(255,255,255,0.68);
+  --faint: rgba(255,255,255,0.5); --hair: rgba(255,255,255,0.1);
   --fill: rgba(255,255,255,0.07); --fill-hi: rgba(255,255,255,0.14);
 }
 * { box-sizing: border-box; margin: 0; }
@@ -65,9 +65,11 @@ body.browser #panel {
 #opts { padding: 0 18px 10px; }
 /* row accessory overlay — never in normal flow, never reserves space */
 .acc { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  display: none; align-items: center; gap: 2px; padding-left: 26px;
-  background: linear-gradient(90deg, transparent, var(--acc-bg) 24px, var(--acc-bg)); }
+  display: none; align-items: center; gap: 2px; }
 .row.sel .acc, .row-line:hover .acc { display: inline-flex; }
+.row.sel .m, .row-line:hover .m { opacity: 0; }
+.row .m { transition: opacity 0.1s ease-out; }
+.row.sel .t, .row-line:hover .t { padding-right: 148px; }
 .acc { gap: 4px; }
 .rowicon { width: 28px; height: 28px; border: none; border-radius: 8px; cursor: pointer;
   background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.78); display: inline-flex;
@@ -85,6 +87,12 @@ body.browser #panel {
 #list { flex: 1; overflow-y: auto; padding: 6px 8px; }
 #list::-webkit-scrollbar { width: 0; }
 .row { border-radius: 9px; cursor: default; }
+.row.exp > .row-line { position: sticky; top: -6px; z-index: 4;
+  background: #1d1d22; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+.row-line { cursor: pointer; }
+.disc { flex: none; width: 8px; color: rgba(255,255,255,0.35); font-size: 10px;
+  transition: transform 0.12s; }
+.row.exp .disc { transform: rotate(90deg); }
 .row-line { position: relative; display: flex; align-items: center; gap: 10px;
   min-height: 40px; padding: 0 10px; min-width: 0; border-radius: 9px;
   --acc-bg: transparent; }
@@ -213,7 +221,12 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .peek::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 2px; }
 .peek .msg { cursor: pointer; border-radius: 6px; padding: 1px 4px; margin: 0 -4px; }
 .peek .msg:hover { background: rgba(255,255,255,0.05); }
+.peek .older { font-size: 11.5px; color: rgba(255,255,255,0.55); cursor: pointer;
+  padding: 3px 4px 6px; }
+.peek .older:hover { color: rgba(255,255,255,0.9); }
 .peek .msg.open span { white-space: normal; overflow: visible; text-overflow: unset; }
+.openopts { display: flex; gap: 6px; justify-content: flex-end; }
+.openopts .actbtn svg { width: 13px; height: 13px; }
 .cardfoot { display: flex; align-items: center; }
 .cardfoot .openin-wrap { margin-left: auto; }
 .filehint { font-size: 11px; color: rgba(255,255,255,0.6); }
@@ -243,8 +256,13 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .chip-deep { font: 600 10px ui-monospace, Menlo, monospace; color: #e8b34c;
   border: 1px solid rgba(232,179,76,0.45); border-radius: 6px; padding: 2px 7px;
   align-self: center; letter-spacing: 0.04em; }
-.art .selmark { color: #7fc97f; font-weight: 700; margin-right: 1px; }
+.art .chk { width: 15px; height: 15px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.28);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; color: #7fc97f; margin-right: 2px; flex: none; }
+.art .chk:hover { border-color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.08); }
+.art .chk.on { border-color: rgba(127,201,127,0.6); background: rgba(127,201,127,0.12); }
 .art:focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
+.morechips { color: rgba(255,255,255,0.55); }
 .morechips:hover { color: var(--ink); }
 .applogo { display: inline-flex; width: 12px; height: 12px; }
 .applogo svg { width: 12px; height: 12px; }
@@ -374,7 +392,12 @@ document.addEventListener("mouseover", (ev) => {
     x = Math.max(12, Math.min(x, p.width - tw - 12));
     if (y + th > p.height - 40) y = r.top - p.top - th - 8;   // flip above near footer
     tip.style.left = x + "px"; tip.style.top = y + "px";
-  }, 480);
+  }, 250);
+}, true);
+document.addEventListener("focusin", (ev) => {
+  const el = ev.target.closest?.("[data-tip]");
+  if (el && !el.getAttribute("aria-label"))
+    el.setAttribute("aria-label", el.dataset.tip.split("|")[0]);
 }, true);
 document.addEventListener("click", hideTip, true);
 $("#list")?.addEventListener?.("scroll", hideTip);
@@ -754,6 +777,17 @@ function visible() {
     vis.sort((a, b) => (a._contentOnly ? 1 : 0) - (b._contentOnly ? 1 : 0)
       || (b.last_used || b.mtime) - (a.last_used || a.mtime));
   }
+  // recents pin HERE so render, keyboard, hover and menus share one order
+  if (!q.length && srcFilter === "all" && mode === "list") {
+    let rp = [];
+    try { rp = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]"); } catch {}
+    const byPath = new Map(vis.map((x) => [x.path, x]));
+    const recents = rp.map((p) => byPath.get(p)).filter(Boolean).slice(0, 2);
+    if (recents.length) {
+      const rs = new Set(recents.map((x) => x.path));
+      return recents.concat(vis.filter((x) => !rs.has(x.path)));
+    }
+  }
   return vis;
 }
 
@@ -857,20 +891,14 @@ function renderList() {
   const list = $("#list");
   const keepScroll = list.scrollTop;   // innerHTML reset must not jump the view
   let recentPaths = [];
-  if (!query && srcFilter === "all") {
-    try { recentPaths = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]"); } catch {}
-    const byPath = new Map(vis.map((x) => [x.path, x]));
-    const recents = recentPaths.map((p) => byPath.get(p)).filter(Boolean).slice(0, 2);
-    if (recents.length) {   // pin recents on top, keep the rest in time order
-      const rp = new Set(recents.map((x) => x.path));
-      vis = recents.concat(vis.filter((x) => !rp.has(x.path)));
-    }
-  }
+  try { recentPaths = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]"); } catch {}
   const recentSet = new Set(recentPaths.slice(0, 2));
-  list.innerHTML = vis.length ? vis.map((s, i) => `
-    <div class="row${i === sel ? " sel" : ""}" role="option" aria-selected="${i === sel}" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
+  let msgHdrDone = false;
+  list.innerHTML = vis.length ? vis.map((s, i) => `${(query && s._contentOnly && !msgHdrDone && (msgHdrDone = true))
+      ? '<div class="mhdr" style="padding:8px 12px 3px">message matches</div>' : ""}
+    <div class="row${i === sel ? " sel" : ""}${expanded === s.path ? " exp" : ""}" role="option" aria-selected="${i === sel}" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
       <div class="row-line">
-        <span class="glyph${openTargetFor(s) ? " canopen" : ""}" ${openTargetFor(s)
+        <span class="disc">›</span><span class="glyph${openTargetFor(s) ? " canopen" : ""}" ${openTargetFor(s)
           ? `role="button" tabindex="0" data-resume="1" data-tip="Open in ${esc(openTargetFor(s))}|⌥⏎"`
           : `data-tip="${esc(SRC_TIPS[s.app] || s.app)}"`}>${GLYPHS[s.app] || GLYPHS._fallback}</span>
         <span class="t">${hiText(s.title)}${s._snippet && $("#q").value.trim().length >= 2
@@ -903,7 +931,7 @@ function renderList() {
   $("#foot").innerHTML = `${chips}<span class="grow"></span><span id="hint">${
     !vis.length && query ? `<kbd>Esc</kbd> clear`
     : query ? `${nvis} result${nvis === 1 ? "" : "s"}${IS_NATIVE ? ` · <kbd>⏎</kbd> Copy context` : ""}`
-    : IS_NATIVE ? `<kbd>⏎</kbd> Copy context · <kbd>⌘K</kbd> Actions` : `click a row for actions`}</span>`;
+    : IS_NATIVE ? `<kbd>→</kbd> Preview · <kbd>⏎</kbd> Copy context · <kbd>⌘K</kbd> Actions` : `click a row to preview · hover for actions`}</span>`;
   $("#foot").querySelectorAll("[data-src]").forEach((el) => el.addEventListener("click", () => {
     srcFilter = (srcFilter === el.dataset.src) ? "all" : el.dataset.src;
     sel = 0; selPath = null; render();
@@ -917,8 +945,6 @@ function renderList() {
   list.scrollTop = keepScroll;
   const cur = list.querySelector(".row.sel");
   if (cur) cur.scrollIntoView({block: "nearest"});
-  // an expanded card must be fully visible — its action bar lives at the bottom
-  list.querySelector(".card")?.scrollIntoView({block: "nearest"});
 }
 
 /* one delegated listener — survives every re-render, no stale handlers */
@@ -946,6 +972,7 @@ $("#list").addEventListener("click", (ev) => {
     openMenu(s, r.right, r.bottom + 6, true);
     return;
   }
+  if (t.closest("#chat-older")) { s._chatAll = true; render(); return; }
   const mb = t.closest(".peek .msg");
   if (mb) {
     const i = mb.dataset.msgi;
@@ -953,23 +980,26 @@ $("#list").addEventListener("click", (ev) => {
     mb.classList.toggle("open");   // in-place, no re-render (keeps scroll)
     return;
   }
+  const chk = t.closest("[data-chk]");
+  if (chk) {   // the checkbox is THE selection control
+    s._sel = s._sel || new Set();
+    s._selTouched = true;
+    s._share = null;  // the old link was built for a different file set
+    s._sel.has(chk.dataset.chk) ? s._sel.delete(chk.dataset.chk) : s._sel.add(chk.dataset.chk);
+    return render();
+  }
   const art = t.closest("[data-art]");
   if (art) {
-    if (ev.detail === 2) {  // double-click: open in the default app
-      api("/api/file/open", {path: s.path, files: [art.dataset.art]})
-        .catch((e) => toast(e.message));
-      return;
-    }
     if (ev.altKey) {  // ⌥-click: reveal in Finder
       api("/api/file/reveal", {path: s.path, files: [art.dataset.art]})
         .then(() => toast("Revealed in Finder")).catch((e) => toast(e.message));
       return;
     }
-    s._sel = s._sel || new Set();
-    s._selTouched = true;
-    s._share = null;  // the old link was built for a different file set
-    s._sel.has(art.dataset.art) ? s._sel.delete(art.dataset.art) : s._sel.add(art.dataset.art);
-    return render();
+    // natural click = SEE the file (Quick Look native, preview fallback)
+    if (nativeCmd("quickLook", [art.dataset.art])) { qlOpen = true; return; }
+    api("/api/file/preview", {path: s.path, files: [art.dataset.art]})
+      .catch((e) => toast(e.message));
+    return;
   }
   if (t.closest("#chips-more")) { s._chipsOpen = !s._chipsOpen; render(); return; }
   if (t.closest("#art-all")) {
@@ -986,8 +1016,20 @@ $("#list").addEventListener("click", (ev) => {
     return;
   }
   if (t.closest("#resume")) return void doResume(s);
+  if (t.closest("[data-odir]")) {
+    const od = t.closest("[data-odir]").dataset.odir;
+    if (od === "app") doResume(s);
+    else api("/api/open_dir", {path: s.path, target: od})
+      .then((d) => toast(d.ok ? `Opened in ${od === "finder" ? "Finder" : od}` : "Couldn't open folder"))
+      .catch((e) => toast(e.message));
+    s._openOpts = false; render();
+    return;
+  }
   if (t.closest("#openin-caret2")) { t.closest("#openin-caret2").id = "openin-caret"; }
   if (t.closest("#openin-caret")) {
+    s._openOpts = !s._openOpts; render(); return;
+  }
+  if (false) {
     const r = t.closest("#openin-caret").getBoundingClientRect();
     closeMenu();
     const dir = (target, label) => () =>
@@ -1061,19 +1103,13 @@ $("#list").addEventListener("contextmenu", (ev) => {
   else api("/api/file/preview", {path: s.path, files: [artChip.dataset.art]})
       .catch((e) => toast(e.message));
 });
-$("#list").addEventListener("dblclick", (ev) => {
-  if (mode !== "list" || ev.target.closest(".acc") || ev.target.closest(".card")) return;
-  const s = sessionAt(ev);
-  if (s && openTargetFor(s)) doResume(s);
-});
 $("#list").addEventListener("mouseover", (ev) => {
   if (Date.now() - _navTs < 400) return;   // don't fight the arrow keys
   const row = ev.target.closest(".row[data-i]");
   if (!row || sel === +row.dataset.i) return;
-  $("#list").querySelector(".row.sel")?.classList.remove("sel");
   sel = +row.dataset.i;
-  selPath = visible()[sel]?.path;
-  row.classList.add("sel");
+  selPath = row.dataset.path;
+  moveSel();
 });
 
 function expiryLabel(st) {
@@ -1102,9 +1138,16 @@ function cardHtml(s) {
   const statBits = [s.n_msgs ? `${s.n_msgs} messages` : null,
     s.n_images ? `${s.n_images} image${s.n_images > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ");
   const chatHdr = `<div class="chathdr"><span>chat</span><span>${statBits}</span></div>`;
-  // scrollable chat: every loaded message, click one to un-clamp it
-  const bubbles = p ? (p.messages || []).filter((m) => (m.text || "").trim()).map((m, i) =>
-    `<div class="msg ${m.role === "user" ? "u" : "a"}${String(s._openMsg) === String(i) ? " open" : ""}" data-msgi="${i}"><i class="${m.role === "user" ? "" : roleCls}">${who(m)}</i><span>${hi(m.text)}</span></div>`).join("") : "";
+  // digestible chat: latest 6 by default, full transcript one click away
+  const allMsgs = p ? (p.messages || []).filter((m) => (m.text || "").trim()) : [];
+  const CUT = 6;
+  const older = allMsgs.length - CUT;
+  const base = (s._chatAll || older <= 0) ? 0 : older;
+  const shown = allMsgs.slice(base);
+  const expander = (!s._chatAll && older > 0)
+    ? `<div class="older" id="chat-older" role="button" tabindex="0">↑ Show ${older} earlier message${older > 1 ? "s" : ""}</div>` : "";
+  const bubbles = p ? expander + shown.map((m, i) =>
+    `<div class="msg ${m.role === "user" ? "u" : "a"}${String(s._openMsg) === String(base + i) ? " open" : ""}" data-msgi="${base + i}"><i class="${m.role === "user" ? "" : roleCls}">${who(m)}</i><span>${hi(m.text)}</span></div>`).join("") : "";
   const lastExtra = (p && p.last && !(p.messages || []).some((m) => m.text === p.last))
     ? `<div class="msg a last${String(s._openMsg) === "last" ? " open" : ""}" data-msgi="last"><i class="${roleCls}">${appShort(s)}</i><span>${hi(p.last)}</span></div>` : "";
   const peek = !p ? '<div class="peekbox"><div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div></div>'
@@ -1115,11 +1158,11 @@ function cardHtml(s) {
     const st = (s._art || {})[a.path];
     const on = s._sel.has(a.path);
     const mark = st === "busy" ? "…" : lastCopied === a.path ? "✓" : "";
-    const selmark = on ? '<b class="selmark">✓</b>' : "";
     const kindWord = {"a-new": "created", "a-mod": "modified", "a-ref": "read (referenced)"}[cls];
-    const tip = `${kindWord}${a.size != null ? ` · ${fmtSize(a.size)}` : ""} — click to select, 2×click opens`;
+    const tip = `${kindWord}${a.size != null ? ` · ${fmtSize(a.size)}` : ""} — click to preview`;
     return `<span class="art ${cls}${on ? " picked" : ""}" role="button" tabindex="0" data-art="${esc(a.path)}" data-tip="${esc(tip)}">
-      ${selmark}<span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
+      <span class="chk${on ? " on" : ""}" data-chk="${esc(a.path)}" data-tip="${on ? "Remove from selection" : "Select for copy/share"}">${on ? "✓" : ""}</span>
+      <span class="fico">${FILE_ICON(a.name)}</span>${esc(a.name)}${mark ? ` <b>${mark}</b>` : ""}</span>`;
   };
   const allChips = p ? [
     ...(p.artifacts || []).filter((a) => a.kind === "created").map((a) => [a, "a-new"]),
@@ -1136,14 +1179,14 @@ function cardHtml(s) {
   const groups = visChips.map(([a, cls]) => chip(a, cls));
   const hidden = allChips.length - visChips.length;
   if (fold && hidden > 0) groups.push(`<span role="button" tabindex="0" class="tog morechips" id="chips-more"
-    title="show every file this session touched">${front.length ? "other changes " : ""}+${hidden} ›</span>`);
+    title="show every file this session touched">Show ${hidden} more file${hidden > 1 ? "s" : ""}</span>`);
   else if (s._chipsOpen && (front.length ? rest.length > 0 : allChips.length > CHIP_CAP))
-    groups.push('<span role="button" tabindex="0" class="tog morechips" id="chips-more" title="collapse the list">‹ less</span>');
+    groups.push('<span role="button" tabindex="0" class="tog morechips" id="chips-more" title="collapse the list">Hide extra files</span>');
   const catNote = p?.pending && s.arts
     ? '<div class="ctl"><span class="share-meta">cataloguing files… (a moment, then reopen)</span></div>' : "";
   const nSel = s._sel.size;
   const nAll = (p?.artifacts || []).length + (p?.reads || []).length;
-  const selHint = nSel ? `<span class="filehint">${nSel} selected · <kbd>⇧⌘C</kbd> copy</span>` : "";
+  const selHint = nSel ? `<button class="actbtn" id="art-copy">Copy ${nSel > 1 ? nSel + " files" : "file"}${IS_NATIVE ? ' <kbd class="ghostkey">⇧⌘C</kbd>' : ""}</button>` : "";
   const arts = groups.length ? `<div class="ctl arts">${groups.join("")}
     ${nAll > 1 ? `<span role="button" tabindex="0" class="tog" id="art-all">${nSel === nAll ? "Clear" : "Select all"}</span>` : ""}
     ${selHint}</div>` : "";
@@ -1159,6 +1202,11 @@ function cardHtml(s) {
       <button class="iconbtn" data-open="${esc(st.url)}" data-tip="Open in browser">open</button></div>` : "";
 
   // ONE primary action, right-aligned: Open in <app> ▾ (folder/terminals in the caret)
+  const openOpts = s._openOpts ? `<div class="openopts">
+    ${openTarget ? `<button class="actbtn" data-odir="app"><span class="applogo">${appLogo(s)}</span>${openTarget}</button>` : ""}
+    <button class="actbtn" data-odir="finder">${I_FOLDER} Finder</button>
+    ${TERMS.map((tm) => `<button class="actbtn" data-odir="${esc(tm.name)}">${I_TERM} ${esc(tm.label)}</button>`).join("")}
+  </div>` : "";
   const footer = `<div class="cardfoot">
     <span class="foot-meta">${opts.deep ? '<span class="chip-deep" data-tip="Deep mode on|⌘D">deep</span>' : ""}</span>
     <span class="openin-wrap">
@@ -1168,7 +1216,7 @@ function cardHtml(s) {
       ${openTarget ? '<button class="actbtn primary caret" id="openin-caret" data-tip="Open in…">▾</button>' : ""}
     </span>
   </div>`;
-  return `<div class="card">${peek}${arts || catNote}${link}${footer}</div>`;
+  return `<div class="card">${peek}${arts || catNote}${link}${openOpts}${footer}</div>`;
 }
 
 async function fetchPeek(s) {
@@ -1438,8 +1486,16 @@ $("#q").addEventListener("keydown", (e) => {  // ⌘A inside the field never bub
 $("#btn-shares").addEventListener("click", async () => {
   mode = mode === "list" ? "shares" : "list";
   $("#btn-shares").classList.toggle("on", mode === "shares");
-  $("#q").value = ""; $("#q").placeholder = mode === "shares" ? "Search shared links…" : "Search sessions…";
-  if (mode === "shares") await loadShares();
+  $("#q").value = ""; $("#q-clear").classList.remove("show");
+  $("#q").placeholder = mode === "shares" ? "Search shared links…" : "Search sessions and messages…";
+  if (mode === "shares") {
+    try { await loadShares(); }
+    catch (e) {
+      toast("Couldn't load shared links — " + e.message);
+      mode = "list"; $("#btn-shares").classList.remove("on");
+      $("#q").placeholder = "Search sessions and messages…";
+    }
+  }
   sel = 0; renderOpts(); render();
 });
 
@@ -1513,7 +1569,7 @@ document.addEventListener("keydown", (e) => {
       if ($("#q").value) { $("#q").value = ""; render(); }
       else {
         mode = "list"; $("#btn-shares").classList.remove("on");
-        $("#q").placeholder = "Search sessions…";
+        $("#q").placeholder = "Search sessions and messages…";
         renderOpts(); render();
       }
     } else if (!e.metaKey && !e.ctrlKey && e.key.length === 1) $("#q").focus();
@@ -1592,7 +1648,11 @@ document.addEventListener("keydown", (e) => {
   render();
   $("#q").focus();
 })();
-window.addEventListener("focus", () => { $("#q").focus(); refresh(); });
+window.addEventListener("focus", () => {
+  if (document.activeElement === document.body || document.activeElement === null)
+    $("#q").focus();   // never yank focus after Quick Look / app switches
+  refresh();
+});
 window.addEventListener("blur", closeMenu);  // panel hidden → menu must not linger
 </script>
 </body>
