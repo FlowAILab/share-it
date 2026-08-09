@@ -21,7 +21,7 @@ import render
 import search
 import share
 
-PORT = 8749
+PORT = int(os.environ.get("SHAREIT_PORT") or 8749)
 import secrets as _secrets
 TOKEN = os.environ.get("SHAREIT_TOKEN") or _secrets.token_urlsafe(24)  # shell-provided, else dev
 TOKEN_PATH = os.path.expanduser("~/.shareit/session_token")

@@ -133,6 +133,17 @@ ck("remote: outside-workspace marked, no abs path",
    "outside workspace" in rem and "/elsewhere" not in rem and "/private" not in rem)
 ck("local keeps absolute artifact paths", "/proj/report.pdf" in loc)
 
+# remote transcript BODY: home prefix must not leak the username
+import os as _os
+home_msgs = [{"role": "user", "text": "t"},
+             {"role": "tool", "name": "Bash",
+              "input": '{"command": "cat ' + _os.path.expanduser("~") + '/notes.txt"}',
+              "output": "from " + _os.path.expanduser("~") + "/notes.txt", "ok": True}]
+rb, _ = bundle.render_transcript(SESSION, home_msgs, remote=True)
+lb, _ = bundle.render_transcript(SESSION, home_msgs, remote=False)
+ck("remote body: home prefix → ~", _os.path.expanduser("~") not in rb and "~/notes.txt" in rb)
+ck("local body keeps real home path", _os.path.expanduser("~") + "/notes.txt" in lb)
+
 # ---- media refs: sniff + unavailability markers -----------------------------
 png = os.path.join(TMP, "ok.png")
 open(png, "wb").write(b"\x89PNG\r\n\x1a\n" + b"0" * 50)

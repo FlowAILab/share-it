@@ -265,6 +265,10 @@ def render_transcript(session, messages, deep=False, remote=False,
         n_tools = sum(1 for e in elided if e[2] == "tool")
         body = (f"*[{len(elided)} earlier items shown as one-line headers to fit the "
                 f"size cap — {n_tools} tool calls among them]*\n" + body)
+    if remote:
+        # transcript bodies inevitably contain paths the agent typed; hosted
+        # copies at least must not leak the username — home prefix becomes ~
+        body = body.replace(os.path.expanduser("~"), "~")
     return body, meta
 
 
