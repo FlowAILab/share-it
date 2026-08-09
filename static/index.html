@@ -438,9 +438,9 @@ function smartCopy() {
   }
   if (mode !== "list") return false;
   const vis = visible();
-  const s = vis.find((x) => x.path === expanded) || vis[sel];
+  const s = vis[sel] || vis.find((x) => x.path === expanded);
   if (!s) return false;
-  copyContext(s);   // ⌘C = copy context (same as ⏎); files have ⇧⌘C
+  copyContext(s);   // ⌘C targets the SELECTED row, exactly like ⏎
   return true;
 }
 
@@ -578,30 +578,7 @@ async function copyFilesOnly(s, fp) {
   toast(`Copied ${fp.length} file${fp.length > 1 ? "s" : ""} — paste anywhere`);
 }
 
-async function copyLastCode(s) {
-  try {
-    const d = await api("/api/last_answer?path=" + encodeURIComponent(s.path));
-    if (!d.code_blocks.length) return toast("no code block in the last answer");
-    await copyText(d.code_blocks[d.code_blocks.length - 1]);
-    toast(d.code_blocks.length > 1 ? `copied last of ${d.code_blocks.length} code blocks` : "code block copied");
-  } catch (e) { toast(e.message); }
-}
 
-async function copySession(s, modeOverride, extraFiles) {  // legacy export path (unreferenced in v2 UI)
-  const m = modeOverride || (opts.deep ? "deep" : "agent");
-  try {
-    const d = await api("/api/export", {path: s.path, mode: m});
-    const files = [d.file, ...(extraFiles || [])];
-    if (nativeCmd("copyFiles", files)) {
-      const n = extraFiles && extraFiles.length;
-      toast(`Session copied · ${d.messages} messages`
-        + (n ? ` · +${n} file${n > 1 ? "s" : ""}` : ""));
-    } else {
-      await copyText(d.file);
-      toast(`Saved ${d.name} — path copied (browser mode)`);
-    }
-  } catch (e) { toast(e.message); }
-}
 
 function menuHTML(items, selIdx) {
   return items.map((i, idx) => i.sep ? '<hr role="separator">'
@@ -635,13 +612,14 @@ function openMenu(s, x, y, anchorRight) {
   placeMenu(el, x, y, anchorRight);
   el.querySelector(".mi.sel")?.focus?.();
   el.addEventListener("keydown", (ev) => {
+    ev.stopPropagation();   // never let the document handler also act
     const mis = [...el.querySelectorAll(".mi")];
     const cur = mis.indexOf(document.activeElement);
     if (ev.key === "ArrowDown") { ev.preventDefault(); mis[Math.min(cur + 1, mis.length - 1)]?.focus(); }
     else if (ev.key === "ArrowUp") { ev.preventDefault(); mis[Math.max(cur - 1, 0)]?.focus(); }
     else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); document.activeElement?.click(); }
     else if (ev.key === "Escape" || ev.key === "Tab") { ev.preventDefault(); closeMenu(); }
-  });
+  }, true);
   el.addEventListener("mouseover", (ev) => {
     const mi = ev.target.closest("[data-mi]");
     if (mi) { menu.sel = +mi.dataset.mi; syncMenuSel(); }
@@ -878,8 +856,8 @@ function noteRecent(path) {
     localStorage.setItem(RECENTS_KEY, JSON.stringify(r.slice(0, 6)));
   } catch {}
 }
-function flashCopied(key) {
-  noteRecent(key);
+function flashCopied(key, isFile) {
+  if (!isFile) noteRecent(key);   // file paths don't belong in session recents
   lastCopied = key;
   setTimeout(() => { if (lastCopied === key) { lastCopied = null; render(); } }, 2400);
   render();
@@ -911,6 +889,7 @@ function renderList() {
     if (i >= 0) sel = i;
   }
   if (sel >= vis.length) sel = Math.max(0, vis.length - 1);
+  if (sel < 0) sel = 0;
   selPath = vis[sel]?.path || null;
   const list = $("#list");
   const keepScroll = list.scrollTop;   // innerHTML reset must not jump the view
@@ -1125,11 +1104,6 @@ function cardHtml(s) {
   };
   const who = (m) => m.role === "user" ? "you" : appShort(s);
   const roleCls = `p-${appShort(s)}`;
-  const bubble = (m) => `<div class="msg ${m.role === "user" ? "u" : "a"}"><i class="${m.role === "user" ? "" : roleCls}">${who(m)}</i><span>${hi(m.text)}</span></div>`;
-  const head = p ? p.messages.slice(0, 3).map(bubble).join("") : "";
-  const lastTxt = p && p.last && !(p.messages.slice(0, 3).some((m) => m.text === p.last)) ? p.last : "";
-  const lastBlock = lastTxt ? `<div class="gap" title="conversation continues">⋯</div>
-    <div class="msg a last"><i class="${roleCls}">${appShort(s)}</i><span title="this is what ⧉ copy last answer copies">${hi(lastTxt)}</span></div>` : "";
   const statBits = [s.n_msgs ? `${s.n_msgs} messages` : null,
     s.n_images ? `${s.n_images} image${s.n_images > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ");
   const chatHdr = `<div class="chathdr"><span>chat</span><span>${statBits}</span></div>`;
@@ -1254,21 +1228,6 @@ async function toggle(s) {
   }
 }
 
-async function copyLastAnswer(s) {
-  try {
-    const d = await api("/api/last_answer?path=" + encodeURIComponent(s.path));
-    if (!d.answer) return toast("No assistant answer found");
-    // TEXT only — pasting "the answer" must give the answer, not attached files
-    // (file URLs on the pasteboard get grabbed first by chat/editor targets)
-    const nCode = d.code_blocks?.length || 0;
-    const suffix = nCode ? ` · ${nCode} code block${nCode > 1 ? "s" : ""} inside` : "";
-    if (d.html && nativeCmd("copyRich", [], {html: d.html, markdown: d.answer, images: []})) {
-      return toast("Answer copied" + suffix);
-    }
-    await copyText(d.answer);
-    toast("Answer copied" + suffix);
-  } catch (e) { toast(e.message); }
-}
 
 function appShort(s) {
   return {"claude-code": "claude", "cowork": "claude", "codex": "codex",
@@ -1310,28 +1269,13 @@ async function shareSelectedArtifacts(s) {
     if (await copyText(lines.join("\n")))
       toast(`Link${lines.length > 1 ? "s" : ""} copied · ${lines.length} file${lines.length > 1 ? "s" : ""}`);
     else return toast("Clipboard write failed — try again");
-    files.forEach((f) => flashCopied(f));
+    files.forEach((f) => flashCopied(f, true));
     s._sel.clear();
     s._share = null;  // session-link file set changed with the selection
   }
   render();
 }
 
-async function doShareArtifact(s, file) {
-  s._art = s._art || {};
-  const st = s._art[file];
-  if (st === "busy") return;
-  if (st && st.url) { copyText(st.url).then((ok) => ok && flashCopied(file)); return; }
-  s._art[file] = "busy"; render();
-  try {
-    const d = await api("/api/share/artifact", {path: s.path, file, expires_hours: opts.expiry});
-    s._art[file] = {url: d.url, provider: d.provider, expires: d.expires};
-    if (await copyText(d.url)) flashCopied(file);
-    else toast("Clipboard write failed — try again");
-    return;
-  } catch (e) { s._art[file] = null; toast(e.message); }
-  render();
-}
 
 async function doShare(s, modeOverride) {
   if (!s || s._share === "busy") return;
@@ -1378,7 +1322,8 @@ async function refresh() {
     sessions = data.sessions.map((n) => {
       const old = keep.get(n.path);
       if (old && old.mtime !== n.mtime) delete peekCache[n.path];  // transcript grew — preview is stale
-      return old && old.mtime === n.mtime ? Object.assign(n, {_share: old._share, _art: old._art, _sel: old._sel, _selTouched: old._selTouched, _chipsOpen: old._chipsOpen, _chatAll: old._chatAll, _openMsg: old._openMsg, _openOpts: old._openOpts}) : n;
+      // carry ALL ui state regardless of mtime (Quick Look / expanded shouldn't reset)
+      return old ? Object.assign(n, {_share: old._share, _art: old._art, _sel: old._sel, _selTouched: old._selTouched, _chipsOpen: old._chipsOpen, _chatAll: old._chatAll, _openMsg: old._openMsg, _openOpts: old._openOpts}) : n;
     });
     stores = data.stores || [];
     if (expanded && !peekCache[expanded]) {  // invalidated above — refetch live
@@ -1406,8 +1351,10 @@ function renderShares() {
   const list = $("#list");
   const live = visibleShares();
   if (sel >= live.length) sel = Math.max(0, live.length - 1);
-  const nGone = shares.length - shares.filter((s) => !s.deleted
-    && (s.expires == null || s.expires - Date.now()/1000 > 0)).length;
+  if (sel < 0) sel = 0;
+  // true expired count = non-deleted links past their expiry (matches the expired view)
+  const nGone = shares.filter((s) => !s.deleted
+    && s.expires != null && (s.expires - Date.now()/1000) <= 0).length;
   // one row per live link — selection index == render index, and every link
   // (including per-file artifact links) is individually visible + deletable
   const expLabel = (s) => {
@@ -1427,7 +1374,7 @@ function renderShares() {
       ? `<button class="iconbtn" data-undo="${esc(s.url)}" aria-label="keep link">undo</button>`
       : canDelete ? `<button class="iconbtn" data-del="${esc(s.url)}" aria-label="delete link">delete</button>`
       : `<button class="iconbtn" disabled title="legacy backend — expires on its own">·</button>`;
-    return `<div class="row${i === sel ? " sel" : ""}${pending ? " pending-del" : ""}" data-i="${i}">
+    return `<div class="row${i === sel ? " sel" : ""}${pending ? " pending-del" : ""}" role="listitem" data-i="${i}">
       <div class="row-line">
         <span class="t"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a></span>
         <span class="share-meta">${meta}</span>
@@ -1437,6 +1384,9 @@ function renderShares() {
       </div></div>`;
   }).join("") : `<div class="empty">${sharesFilter === "expired" ? "No expired links"
     : ($("#q").value ? `No shared links match “${esc($("#q").value)}”` : "No shared links yet")}</div>`;
+  const selRow = list.querySelector(`.row[data-i="${sel}"]`);
+  if (selRow && _wantScroll) selRow.scrollIntoView({block: "nearest"});
+  _wantScroll = false;
   const label = sharesFilter === "expired" ? "expired" : "live";
   $("#foot").innerHTML = `<span>${live.length} ${label}${(sharesFilter !== "expired" && nGone) ? ` · ${nGone} expired` : ""}</span>
     <span class="grow"></span><span><kbd>⏎</kbd>/<kbd>⌘C</kbd> copy · <kbd>esc</kbd> back</span>`;
@@ -1558,13 +1508,13 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
-  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".seg span, .tog, .copychip, .morechips, .art, .srcf, .chk, .older, .glyph.canopen")) {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".seg span, .tog, .copychip, .morechips, .artbody, .chk, .srcf, .older, .glyph.canopen")) {
     e.preventDefault(); e.target.click(); return;
   }
   if (mode === "shares") {
     const live = visibleShares();
-    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, live.length - 1); e.preventDefault(); render(); }
-    else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); e.preventDefault(); render(); }
+    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, live.length - 1); e.preventDefault(); _wantScroll = true; render(); }
+    else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); e.preventDefault(); _wantScroll = true; render(); }
     else if (e.key === "Enter" || ((e.metaKey || e.ctrlKey) && e.key === "c"
              && !window.getSelection()?.toString())) {
       e.preventDefault();
@@ -1634,7 +1584,7 @@ document.addEventListener("keydown", (e) => {
   }
   else if (e.key === "ArrowLeft" && mode === "list") {
     e.preventDefault();
-    if (expanded) { expanded = null; render(); }          // left goes back out
+    if (expanded) { expanded = null; _wantScroll = true; render(); }   // left goes back out
   }
   else if (e.key === "Escape") {
     e.preventDefault();  // no system beep
