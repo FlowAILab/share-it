@@ -477,7 +477,8 @@ async function sendResult(s, textOnly) {
   try {
     const explicit = s._selTouched ? [...(s._sel || [])] : undefined;
     const d = await api("/api/result", {path: s.path,
-      ...(explicit !== undefined ? {files: explicit} : {})});
+      ...(textOnly ? {message_only: true}
+                   : (explicit !== undefined ? {files: explicit} : {}))});
     const files = d.files || [];
 
     if (textOnly || files.length === 0) {   // the write-up, as text

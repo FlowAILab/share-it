@@ -920,7 +920,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "files must be a list (omit for defaults)"}, 400)
             files_req = body.get("files")
             skipped = []
-            if files_req is None:
+            if body.get("message_only"):
+                # ⌥⌘R — the write-up alone; no files, so no 'Attached:' line
+                files = []
+            elif files_req is None:
                 arts = _session_artifacts(session)
                 files = []
                 # defaults derive from the CHOSEN answer — attachments and
@@ -1115,9 +1118,13 @@ _TEMPISH = re.compile(
 
 
 _MD_LOCAL_LINK = re.compile(r"\[([^\]\n]+)\]\((/[^)\s]+|~/[^)\s]+|file://[^)\s]+)\)")
-_BARE_LOCAL = re.compile(r"(?<![\w./])(?:/Users/[^\s`)\]]+|~/[^\s`)\]]+)")
-# spans the bare-path shortener must NOT touch: fenced/inline code and real URLs
-_PROTECT = re.compile(r"```.*?```|`[^`\n]+`|(?:https?|file|ftp)://\S+", re.DOTALL)
+# bare local paths to shorten to basename — including file:// URLs, which are
+# always local and leak the username just like a plain /Users path
+_BARE_LOCAL = re.compile(
+    r"(?<![\w./])(?:file://(?:localhost)?/[^\s`)\]]+|/Users/[^\s`)\]]+|~/[^\s`)\]]+)")
+# spans the bare-path shortener must NOT touch: fenced/inline code and NETWORK
+# URLs (http/https/ftp). file:// is deliberately excluded — it's local.
+_PROTECT = re.compile(r"```.*?```|`[^`\n]+`|(?:https?|ftp)://\S+", re.DOTALL)
 _ATTACH_TAIL = re.compile(r"\n*📎 Attached:[^\n]*\Z")
 
 
@@ -1146,10 +1153,13 @@ def _clean_result_message(text, files):
     tmp = _BARE_LOCAL.sub(lambda m: os.path.basename(m.group(0).rstrip("/")), tmp)
     text = re.sub(r"\x00(\d+)\x00", lambda m: stash[int(m.group(1))], tmp)
 
+    # always drop any prior 'Attached:' tail (idempotent, and a message-only
+    # send must never claim files it isn't carrying), then re-state it only
+    # when files actually ride along
+    text = _ATTACH_TAIL.sub("", text.rstrip()).rstrip()
     if files:
         names = ", ".join(os.path.basename(f) for f in files)
-        text = _ATTACH_TAIL.sub("", text.rstrip())   # idempotent: drop any prior tail
-        text = text.rstrip() + f"\n\n📎 Attached: {names}"
+        text = text + f"\n\n📎 Attached: {names}"
     return text
 
 
