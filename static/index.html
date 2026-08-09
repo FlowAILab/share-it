@@ -68,9 +68,12 @@ body.browser #panel {
   display: inline-flex; align-items: center; gap: 2px;
   opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.1s ease-out; }
 .row.sel .acc, .row-line:hover .acc { opacity: 1; visibility: visible; pointer-events: auto; }
-.row.sel .m, .row-line:hover .m { opacity: 0; }
-.row .m { transition: opacity 0.1s ease-out; }
-.row.sel .t, .row-line:hover .t { padding-right: 148px; }
+.row .m .proj, .row .m .when { transition: opacity 0.1s ease-out; }
+.row.sel .m .proj, .row.sel .m .when,
+.row-line:hover .m .proj, .row-line:hover .m .when { opacity: 0; }
+.row.sel .t, .row-line:hover .t { padding-right: 168px; }
+/* the file pill never fades — it must stay clickable on hover */
+.row.sel .m .clip, .row-line:hover .m .clip { position: relative; z-index: 3; margin-right: 150px; }
 .acc { gap: 4px; }
 .rowicon { width: 28px; height: 28px; border: none; border-radius: 8px; cursor: pointer;
   background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.78); display: inline-flex;
@@ -124,12 +127,13 @@ body.browser #panel {
 .recent-tag { font: 500 9.5px ui-monospace, Menlo, monospace; letter-spacing: 0.06em;
   text-transform: uppercase; color: rgba(255,255,255,0.35);
   border: 1px solid rgba(255,255,255,0.12); border-radius: 5px; padding: 1px 5px; }
-.row .clip { flex: none; display: inline-flex; align-items: center; gap: 3px;
+.row .clip { flex: none; display: inline-flex; align-items: center; gap: 3px; cursor: pointer;
              font: 600 11px/1 -apple-system, system-ui; font-variant-numeric: tabular-nums;
              color: #e0b271; background: rgba(224,178,113,0.14);
              border: 1px solid rgba(224,178,113,0.28); border-radius: 6px; padding: 2px 6px; }
 .row .clip svg { width: 11px; height: 11px; }
 .row:hover .clip, .row.sel .clip { color: #f0c68a; background: rgba(224,178,113,0.2); }
+.row .clip:hover { background: rgba(224,178,113,0.3) !important; color: #ffd9a0 !important; }
 .empty { color: var(--dim); text-align: center; margin-top: 80px; font-weight: 300; font-size: 14px; }
 .empty .esc-hint { margin-top: 10px; font-size: 12px; color: var(--faint); }
 
@@ -449,6 +453,7 @@ function smartCopy() {
    handoff prompt + path). localOnly: private text + host-only paths must not
    ride Universal Clipboard. */
 async function copyContext(s) {
+  if (!s) return;
   try {
     const d = await api("/api/copy_context", {path: s.path, deep: opts.deep});
     const ackP = nativeCmdAck("copyText", [], {text: d.text, localOnly: true});
@@ -532,8 +537,7 @@ function menuItemsFor(s) {
                   : [...(s.art_list || []), ...(s.read_list || [])];
   const fp = files.map((f) => f.path);
   const nf = files.length;
-  const selPaths = s._sel?.size ? [...s._sel]
-    : (s._selTouched ? [] : (p?.primary?.length ? p.primary : fp));
+  const selPaths = selectedFilePaths(s);
   const nSelM = selPaths.length;
   const base = (q) => q.split("/").pop();
   const payload = nSelM === 1 ? base(selPaths[0]) : `${nSelM} files`;
@@ -612,13 +616,14 @@ function openMenu(s, x, y, anchorRight) {
   placeMenu(el, x, y, anchorRight);
   el.querySelector(".mi.sel")?.focus?.();
   el.addEventListener("keydown", (ev) => {
-    ev.stopPropagation();   // never let the document handler also act
+    if (!["ArrowDown", "ArrowUp", "Enter", " ", "Escape", "Tab"].includes(ev.key)) return;
+    ev.preventDefault(); ev.stopPropagation();   // stop ONLY the keys we own
     const mis = [...el.querySelectorAll(".mi")];
     const cur = mis.indexOf(document.activeElement);
-    if (ev.key === "ArrowDown") { ev.preventDefault(); mis[Math.min(cur + 1, mis.length - 1)]?.focus(); }
-    else if (ev.key === "ArrowUp") { ev.preventDefault(); mis[Math.max(cur - 1, 0)]?.focus(); }
-    else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); document.activeElement?.click(); }
-    else if (ev.key === "Escape" || ev.key === "Tab") { ev.preventDefault(); closeMenu(); }
+    if (ev.key === "ArrowDown") mis[Math.min(cur + 1, mis.length - 1)]?.focus();
+    else if (ev.key === "ArrowUp") mis[Math.max(cur - 1, 0)]?.focus();
+    else if (ev.key === "Enter" || ev.key === " ") document.activeElement?.click();
+    else closeMenu();
   }, true);
   el.addEventListener("mouseover", (ev) => {
     const mi = ev.target.closest("[data-mi]");
@@ -711,9 +716,20 @@ const rel = (t) => {
 
 let sessions = [], shares = [], stores = [], caps = {}, mode = "list", sel = 0, selPath = null, expanded = null, peekCache = {};
 let srcFilter = "all";
+let _pinnedRecents = null;   // frozen recents order — stable while you use the palette
+function refreshPins() { _pinnedRecents = null; }   // next visible() recomputes
 let TERMS = [];
 const I_TERM = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.2" y="2" width="11.6" height="10" rx="2"/><path d="M3.6 5.4 5.8 7.2 3.6 9M6.8 9.4h3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const I_FOLDER = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M1.4 3.6a1.2 1.2 0 0 1 1.2-1.2h2.6l1.4 1.5h4.8a1.2 1.2 0 0 1 1.2 1.2v5.3a1.2 1.2 0 0 1-1.2 1.2H2.6a1.2 1.2 0 0 1-1.2-1.2z"/></svg>';
+function selectedFilePaths(s) {   // the ONE source of truth for ⇧⌘C + menu
+  if (s._sel?.size) return [...s._sel];
+  const p = peekCache[s.path];
+  if (s._selTouched) return [];
+  if (p?.primary?.length) return p.primary;
+  const files = p ? [...(p.artifacts || []), ...(p.reads || [])]
+                  : [...(s.art_list || []), ...(s.read_list || [])];
+  return files.map((f) => f.path);
+}
 const SRC_TIPS = {"claude-code": "Claude Code", "cowork": "Cowork", "codex": "Codex",
   "cursor": "Cursor", "pi": "Pi", "opencode": "OpenCode", "goose": "Goose",
   "continue": "Continue", "cline": "Cline", "roo": "Roo Code", "copilot": "Copilot"};
@@ -777,12 +793,15 @@ function visible() {
     vis.sort((a, b) => (a._contentOnly ? 1 : 0) - (b._contentOnly ? 1 : 0)
       || (b.last_used || b.mtime) - (a.last_used || a.mtime));
   }
-  // recents pin HERE so render, keyboard, hover and menus share one order
+  // recents pin from a FROZEN snapshot — acting on a row must NOT reorder the
+  // live list under the cursor. The snapshot only refreshes on open/search.
   if (!q.length && srcFilter === "all" && mode === "list") {
-    let rp = [];
-    try { rp = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]"); } catch {}
+    if (_pinnedRecents === null) {
+      try { _pinnedRecents = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]").slice(0, 2); }
+      catch { _pinnedRecents = []; }
+    }
     const byPath = new Map(vis.map((x) => [x.path, x]));
-    const recents = rp.map((p) => byPath.get(p)).filter(Boolean).slice(0, 2);
+    const recents = _pinnedRecents.map((p) => byPath.get(p)).filter(Boolean);
     if (recents.length) {
       const rs = new Set(recents.map((x) => x.path));
       return recents.concat(vis.filter((x) => !rs.has(x.path)));
@@ -908,7 +927,7 @@ function renderList() {
           ? `<span class="snip">${esc(s._snippet).replace(/«/g, "<b>").replace(/»/g, "</b>")}</span>` : ""}</span>
         <span class="m">
           ${!query && srcFilter === "all" && recentSet.has(s.path) && i < 2 ? '<span class="recent-tag">recent</span>' : ""}
-          ${(s.n_primary ?? s.arts) ? `<span class="clip" data-tip="${s.n_primary ?? s.arts} deliverable${(s.n_primary ?? s.arts) > 1 ? "s" : ""} · ${s.arts} file${s.arts > 1 ? "s" : ""} total"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.n_primary ?? s.arts}</span>` : ""}
+          ${(s.n_primary ?? s.arts) ? `<button class="clip" data-files="1" tabindex="0" data-tip="${s.n_primary ?? s.arts} file${(s.n_primary ?? s.arts) > 1 ? "s" : ""} — click to view"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.n_primary ?? s.arts}</button>` : ""}
           <span class="proj">${esc(s.project || "")}</span><span class="when">${rel(s.last_used || s.mtime)}</span>
         </span>
         ${accessoryHtml(s)}
@@ -937,7 +956,7 @@ function renderList() {
     : IS_NATIVE ? `<kbd>→</kbd> Preview · <kbd>⏎</kbd> Copy context · <kbd>⌘K</kbd> Actions` : `click a row to preview · hover for actions`}</span>`;
   $("#foot").querySelectorAll("[data-src]").forEach((el) => el.addEventListener("click", () => {
     srcFilter = (srcFilter === el.dataset.src) ? "all" : el.dataset.src;
-    sel = 0; selPath = null; render();
+    sel = 0; selPath = null; refreshPins(); render();
   }));
   const lnk = list.querySelector("#lnk[data-fresh]");
   if (lnk) {  // highlight once, right after creation — not on every re-render
@@ -1281,13 +1300,17 @@ async function doShare(s, modeOverride) {
   if (!s || s._share === "busy") return;
   const wantMode = modeOverride || (opts.deep ? "deep" : "agent");
   // #9: a cached link is only reusable if it was built for THIS mode + files
-  if (s._share?.url && !modeOverride && s._share.mode === wantMode && !s._selTouched) {
+  const cacheOk = s._share?.url && !modeOverride && s._share.mode === wantMode
+    && !s._selTouched && s._share.mtime === s.mtime
+    && (s._share.expires == null || s._share.expires - Date.now()/1000 > 60);
+  if (cacheOk) {
     if (!(await copyText(s._share.url)))
       return toast("Clipboard write failed — try again");
     const n = s._share.n_files;
     toast(`Link copied${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
     return;
   }
+  if (s._share && !cacheOk && s._share !== "busy") s._share = null;   // stale/expired — rebuild
   s._share = "busy"; render();
   const gen = optsGen;
   try {
@@ -1298,7 +1321,7 @@ async function doShare(s, modeOverride) {
       ...(selFiles ? {files: selFiles} : {})});
     if (gen !== optsGen) { s._share = null; render(); return; }  // options changed mid-flight
     s._share = {url: d.url, provider: d.provider, expires: d.expires,
-                n_files: d.n_files || 0, mode: wantMode, fresh: true};
+                n_files: d.n_files || 0, mode: wantMode, fresh: true, mtime: s.mtime};
     if (!(await copyText(d.url))) { s._share.fresh = true; render(); return toast("Link created — clipboard write failed, copy it from the row"); }
     const bits = [`Link copied`];
     if (d.n_files) bits.push(`${d.n_files} file${d.n_files > 1 ? "s" : ""}`);
@@ -1323,7 +1346,8 @@ async function refresh() {
       const old = keep.get(n.path);
       if (old && old.mtime !== n.mtime) delete peekCache[n.path];  // transcript grew — preview is stale
       // carry ALL ui state regardless of mtime (Quick Look / expanded shouldn't reset)
-      return old ? Object.assign(n, {_share: old._share, _art: old._art, _sel: old._sel, _selTouched: old._selTouched, _chipsOpen: old._chipsOpen, _chatAll: old._chatAll, _openMsg: old._openMsg, _openOpts: old._openOpts}) : n;
+      const keepShare = (old && old._share && old._share.mtime === n.mtime) ? old._share : null;
+      return old ? Object.assign(n, {_share: keepShare, _art: old._art, _sel: old._sel, _selTouched: old._selTouched, _chipsOpen: old._chipsOpen, _chatAll: old._chatAll, _openMsg: old._openMsg, _openOpts: old._openOpts}) : n;
     });
     stores = data.stores || [];
     if (expanded && !peekCache[expanded]) {  // invalidated above — refetch live
@@ -1428,13 +1452,14 @@ async function loadShares() { shares = (await api("/api/shares")).shares; }
 
 $("#q").addEventListener("input", () => {
   sel = 0; selPath = null; expanded = null;   // ⏎ must act on the TOP result
+  refreshPins();
   $("#q-clear").classList.toggle("show", !!$("#q").value);
   if (mode === "list") queueSearch();
   render();
 });
 $("#q-clear").addEventListener("click", () => {
   $("#q").value = ""; $("#q-clear").classList.remove("show");
-  contentHits = []; sel = 0; selPath = null; render(); $("#q").focus();
+  contentHits = []; sel = 0; selPath = null; refreshPins(); render(); $("#q").focus();
 });
 $("#q").addEventListener("keydown", (e) => {  // ⌘A inside the field never bubbles as beep
   if ((e.metaKey || e.ctrlKey) && e.key === "a") e.stopPropagation();
@@ -1508,7 +1533,7 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
-  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".seg span, .tog, .copychip, .morechips, .artbody, .chk, .srcf, .older, .glyph.canopen")) {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".tog, .morechips, .artbody, .chk, .srcf, .older, .clip, .glyph.canopen")) {
     e.preventDefault(); e.target.click(); return;
   }
   if (mode === "shares") {
@@ -1538,6 +1563,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
+    if (!vis.length) return;
     _navTs = Date.now();
     sel = e.key === "ArrowDown" ? Math.min(sel + 1, vis.length - 1) : Math.max(sel - 1, 0);
     selPath = vis[sel]?.path;
@@ -1570,13 +1596,10 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     const s = vis[sel];
     if (!s) return;
-    const p = peekCache[s.path];
     if (s._selTouched && !s._sel?.size) return void toast("No files selected");
-    const files = s._sel?.size ? [...s._sel]
-      : p?.primary?.length ? p.primary
-      : [...(s.art_list || []), ...(s.read_list || [])].map((f) => f.path);
+    const files = selectedFilePaths(s);
     if (files.length) copyFilesOnly(s, files);
-    else toast("No files in this session");   // no silent fallback to the answer
+    else toast("No files in this session");
   }
   else if (e.key === "ArrowRight" && mode === "list") {
     e.preventDefault();
@@ -1607,6 +1630,7 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("focus", () => {
   if (document.activeElement === document.body || document.activeElement === null)
     $("#q").focus();   // never yank focus after Quick Look / app switches
+  refreshPins();       // re-pin recents for this fresh look at the palette
   refresh();
 });
 window.addEventListener("blur", closeMenu);  // panel hidden → menu must not linger
