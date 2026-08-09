@@ -916,8 +916,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(
                     {"error": "No completed result — the session looks interrupted"}, 409)
             answer = msg["text"]
-            html = render.result_clipboard_html(answer)
-            md = render.redact(answer)
             if "files" in body and body.get("files") is None:
                 return self._json({"error": "files must be a list (omit for defaults)"}, 400)
             files_req = body.get("files")
@@ -943,6 +941,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(
                         {"error": f"selected file(s) no longer exist: {names}"}, 400)
                 files = files_req
+            # a result message is for a HUMAN — strip dead local file paths
+            # (they leak the username and can't be opened by a recipient); the
+            # real files ride the clipboard as attachments instead
+            answer = _clean_result_message(answer, files)
+            html = render.result_clipboard_html(answer)
+            md = render.redact(answer)
             return self._json({"answer": md, "html": html, "files": files,
                                "skipped": [os.path.basename(s) for s in skipped]})
         if route in ("/api/file/copy", "/api/file/reveal", "/api/file/open", "/api/file/preview"):
@@ -1108,6 +1112,31 @@ _MEANINGFUL_EXT = re.compile(
 _TEMPISH = re.compile(
     r"(^|/)(node_modules|__pycache__|dist|build|target|\.wrangler|\.git|\.venv|venv)(/|$)"
     r"|\.(log|tmp|lock|pyc|pyo|o|class|map|min\.js)$|(^|/)\.DS_Store$")
+
+
+_MD_LOCAL_LINK = re.compile(r"\[([^\]\n]+)\]\((/[^)\s]+|~/[^)\s]+|file://[^)\s]+)\)")
+_BARE_LOCAL = re.compile(r"(?<![\w./])(?:/Users/[^\s`)\]]+|~/[^\s`)\]]+)")
+
+
+def _clean_result_message(text, files):
+    """Make a 'send result' message safe to hand a human.
+
+    A local file path is useless to a recipient and leaks the username — the
+    real files ride the clipboard as attachments. So: drop the URL from
+    markdown links that point at a local path (keep the label), shorten any
+    bare local path to its basename, then append a clean 'Attached: …' line
+    listing what's actually on the clipboard."""
+    def _mdsub(m):
+        label, target = m.group(1), m.group(2)
+        if target.startswith(("http://", "https://", "mailto:")):
+            return m.group(0)      # real links stay
+        return label                # dead local link → just its label
+    text = _MD_LOCAL_LINK.sub(_mdsub, text)
+    text = _BARE_LOCAL.sub(lambda m: os.path.basename(m.group(0).rstrip("/")), text)
+    if files:
+        names = ", ".join(os.path.basename(f) for f in files)
+        text = text.rstrip() + f"\n\n📎 Attached: {names}"
+    return text
 
 
 def _completed_result(messages):
