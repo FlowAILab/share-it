@@ -281,8 +281,9 @@ def _artifact_fingerprint(session, opts):
     bundle can never be served as cached. Files are <=25MB, so full hashing is
     cheap; ValueError (missing/oversize pick) propagates rather than aliasing
     a broken selection to a chat-only cache hit. File-backed media refs are
-    fingerprinted too (path+size+mtime): replacing an externally referenced
-    image must invalidate the cached bundle."""
+    fingerprinted with a content hash of the exact validated-and-stripped bytes
+    a share would upload — refused refs contribute a refusal marker and are
+    never opened (bundle.read_ref is the single gate)."""
     import hashlib
     pool = _effective_files(session, opts)
     parts = []
@@ -301,13 +302,12 @@ def _artifact_fingerprint(session, opts):
             for r in m.get("media_refs") or []:
                 p = r.get("path") or ""
                 try:
-                    h = hashlib.sha256()   # content digest — same-size/mtime
-                    with open(p, "rb") as fh:   # replacements must invalidate
-                        for chunk in iter(lambda: fh.read(1 << 20), b""):
-                            h.update(chunk)
-                    parts.append(f"ref:{p}:{int(bool(r.get('structured')))}:{h.hexdigest()}")
-                except OSError:
-                    parts.append(f"ref:{p}:missing")
+                    # same validation gate as sharing — a forbidden ref is
+                    # NEVER opened here (no /dev/zero hangs, no exfil probes)
+                    data, _mt = bundle.read_ref(r, remote=True)
+                    parts.append(f"ref:{p}:{hashlib.sha256(data).hexdigest()}")
+                except (OSError, ValueError):
+                    parts.append(f"ref:{p}:refused")
     except Exception:
         pass
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]

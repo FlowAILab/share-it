@@ -14,9 +14,8 @@ Layers, in execution order. A layer must be green before the next runs.
       (12 cases incl. first-turn stop:null + old-format codex), result-HTML
       hostile inputs, FTS title-only reindex, share-cache title invalidation,
       codex official-title sources (sqlite + session_index overlay).
-      NOT automated (manual in layers 5–6): the three browser-mode
-      clipboard-failure branches; share failure-injection (PUT/commit faults,
-      partial-bundle visibility) — exercised once manually before 1.0 tag.
+- [ ] `python3 tests/unit.py` — parser/search/cache/lifecycle/media
+      regressions (pre-existing core suite).
 - [ ] `python3 tests/clients.py` — 7 client adapters on synthetic stores.
 - [ ] JS parse gate, `python3 -m ast` on all touched modules, Swift build.
 
@@ -62,6 +61,18 @@ Layers, in execution order. A layer must be green before the next runs.
       Paste results into TextEdit + Terminal after each.
 - [ ] Shares view: list, copy, delete still work.
 - [ ] Regression: peek, artifact chips select/QuickLook, search highlight.
+- [ ] FAILURE GATES (manual, pass criteria in parentheses):
+      - [ ] R2 PUT failure — invalid upload token → /api/share 502, NO share
+            recorded, shares list unchanged.
+      - [ ] commit/manifest failure — kill network mid-share → 502, link never
+            resolves to a partial bundle (fetch → 404).
+      - [ ] pasteboard writeObjects=false — simulate via pbinspect harness →
+            failure toast, no success flash.
+      - [ ] browser clipboard rejection (deny permission) → error toast, no
+            success UI, link still shown in row for manual copy.
+      - [ ] /api/file/copy {ok:false} (osascript blocked) → failure toast.
+      - [ ] ack-timeout compat — old shell without __pbAck → copies still
+            succeed with normal toast (null = unverified, not failure).
 
 ## 6. Cross-agent acceptance (the product's whole point)
 - [ ] Claude→Codex: copy a real Claude session's context, paste into Codex,

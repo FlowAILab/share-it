@@ -423,6 +423,45 @@ def _ref_allowed(real, remote):
     return any(real == r or real.startswith(r + os.sep) for r in expanded)
 
 
+import stat as _stat
+
+
+def validate_ref(r, remote):
+    """THE single gate for file-backed image refs — used by media resolution
+    AND cache fingerprinting, so nothing ever opens a ref that would not ship.
+    Order: provenance -> realpath containment -> regular-file (never devices/
+    FIFOs) -> size cap. Returns the real path or raises ValueError."""
+    p = r.get("path") or ""
+    # remote shares resolve ONLY harness-written structured attachments —
+    # text markers are spoofable exfil vectors
+    if remote and not r.get("structured"):
+        raise ValueError("unprovenanced ref")
+    real = os.path.realpath(p)
+    if not _ref_allowed(real, remote):
+        raise ValueError("outside allowed roots")
+    st = os.lstat(real) if os.path.islink(real) else os.stat(real)
+    if not _stat.S_ISREG(st.st_mode):
+        raise ValueError("not a regular file")   # /dev/zero, FIFOs, dirs
+    if st.st_size > IMG_MAX_BYTES:
+        raise ValueError("over size cap")
+    return real
+
+
+def read_ref(r, remote):
+    """validate -> read -> sniff -> strip metadata. Returns (bytes, mimetype)
+    — exactly the bytes a share would upload — or raises ValueError/OSError."""
+    import media as _media
+    real = validate_ref(r, remote)
+    with open(real, "rb") as fh:
+        data = fh.read(IMG_MAX_BYTES + 1)
+    if len(data) > IMG_MAX_BYTES:
+        raise ValueError("grew past cap")
+    mt = _sniff(data[:16])
+    if not mt:
+        raise ValueError("not an image")
+    return _media.strip_metadata(data, mt), mt
+
+
 def resolve_media(messages, remote=False):
     """Inline base64 -> objects (via media.collect); file refs -> validated
     bytes behind root containment + magic sniff + size caps. Annotates entries
@@ -433,23 +472,10 @@ def resolve_media(messages, remote=False):
     n = len(objs)
     for msg in messages:
         for r in msg.get("media_refs") or []:
-            p = r.get("path") or ""
             try:
-                # remote shares resolve ONLY harness-written structured
-                # attachments — text markers are spoofable exfil vectors
-                if remote and not r.get("structured"):
-                    raise ValueError("unprovenanced ref")
-                real = os.path.realpath(p)
-                st = os.stat(real)
-                if (not os.path.isfile(real) or not _ref_allowed(real, remote)
-                        or st.st_size > IMG_MAX_BYTES or n >= IMG_MAX_COUNT):
-                    raise ValueError("containment/cap")
-                with open(real, "rb") as fh:
-                    data = fh.read()
-                mt = _sniff(data[:16])
-                if not mt:
-                    raise ValueError("not an image")
-                data = _media.strip_metadata(data, mt)   # EXIF/GPS/text chunks
+                if n >= IMG_MAX_COUNT:
+                    raise ValueError("cap")
+                data, mt = read_ref(r, remote)
             except (OSError, ValueError):
                 skipped += 1
                 r.pop("name", None)

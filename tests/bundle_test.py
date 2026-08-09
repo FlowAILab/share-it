@@ -363,6 +363,25 @@ finally:
     _p._CODEX_HOME = _old_home
 
 
+
+# ---- forbidden refs are never opened (FIFO would block any open()) ----------
+fifo = os.path.join(TMP, "trap.fifo")
+os.mkfifo(fifo)
+import time as _tm
+t0 = _tm.time()
+try:
+    bundle.read_ref({"path": fifo, "structured": True}, remote=False)
+    opened = True
+except ValueError:
+    opened = False
+ck("FIFO ref refused WITHOUT opening (no hang)", not opened and _tm.time() - t0 < 1.0)
+try:
+    bundle.read_ref({"path": "/dev/zero", "structured": True}, remote=False)
+    dev_ok = False
+except (ValueError, OSError):
+    dev_ok = True
+ck("/dev/zero refused by regular-file gate", dev_ok)
+
 print()
 if FAIL:
     print(f"{len(FAIL)} FAILURES: {FAIL}")
