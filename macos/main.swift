@@ -214,16 +214,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard let dict = message.body as? [String: Any],
               let cmd = dict["cmd"] as? String else { return }
         let files = (dict["files"] as? [String] ?? []).map { URL(fileURLWithPath: $0) }
+        // every copy command acknowledges its actual writeObjects result back
+        // to the page, so a failed write toasts as a failure, never a success
+        func ack(_ ok: Bool) {
+            if let id = dict["ack"] as? Int {
+                webView.evaluateJavaScript("window.__pbAck && window.__pbAck(\(id), \(ok))")
+            }
+        }
         switch cmd {
         case "copyText":  // plain text via native pasteboard — WKWebView's
             // navigator.clipboard fails without focus, this never does
             let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setString(dict["text"] as? String ?? "", forType: .string)
+            // localOnly: private transcript text / host-only paths must not
+            // ride Universal Clipboard to the user's other devices
+            if dict["localOnly"] as? Bool == true {
+                pb.prepareForNewContents(with: .currentHostOnly)
+            } else {
+                pb.clearContents()
+            }
+            ack(pb.setString(dict["text"] as? String ?? "", forType: .string))
         case "copyFiles":  // real file objects on the pasteboard — Finder-grade paste
             let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.writeObjects(files as [NSPasteboardWriting])
+            pb.prepareForNewContents(with: .currentHostOnly)  // paths are host-only
+            ack(pb.writeObjects(files as [NSPasteboardWriting]))
         case "copyRich":
             // one text item carrying three flavors of the SAME content — the
             // receiving app picks: html (Slack/Gmail), rtf (Mail/Notes),
@@ -232,11 +245,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let markdown = dict["markdown"] as? String ?? ""
             let images = (dict["images"] as? [String] ?? []).map { URL(fileURLWithPath: $0) }
             let pb = NSPasteboard.general
-            pb.clearContents()
+            if files.isEmpty && images.isEmpty {
+                pb.clearContents()
+            } else {
+                pb.prepareForNewContents(with: .currentHostOnly)  // file paths ride along
+            }
             var items: [NSPasteboardWriting] = []
             let text = NSPasteboardItem()
             if !html.isEmpty {
                 text.setString(html, forType: .html)
+                // html is produced by our escape-first renderer and carries no
+                // <img>, so this conversion never loads a remote/local resource
                 if let attr = NSAttributedString(html: Data(html.utf8), documentAttributes: nil),
                    let rtf = attr.rtf(from: NSRange(location: 0, length: attr.length),
                                       documentAttributes: [:]) {
@@ -258,7 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 }
             }
             items.append(contentsOf: files as [NSPasteboardWriting])
-            pb.writeObjects(items)
+            ack(pb.writeObjects(items))
         case "quickLook":
             qlOpenedAt = Date().timeIntervalSince1970
             qlFiles = files

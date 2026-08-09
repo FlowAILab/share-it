@@ -187,6 +187,14 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
   padding: 4px 11px; }
 .actbtn:hover { color: var(--ink); background: rgba(255,255,255,0.09); }
 .actbtn .applogo { display: inline-flex; width: 12px; height: 12px; }
+.actbtn.primary { color: var(--ink); border-color: rgba(255,255,255,0.28);
+  background: rgba(255,255,255,0.12); font-weight: 600; }
+.actbtn.primary:hover { background: rgba(255,255,255,0.18); }
+.actbtn .dimlbl { color: var(--faint); font-size: 10.5px; }
+.actbar { flex-wrap: wrap; }
+.chip-deep { font: 600 10px ui-monospace, Menlo, monospace; color: #e8b34c;
+  border: 1px solid rgba(232,179,76,0.45); border-radius: 6px; padding: 2px 7px;
+  align-self: center; letter-spacing: 0.04em; }
 .art .selmark { color: #7fc97f; font-weight: 700; margin-right: 1px; }
 .art:focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
 .morechips:hover { color: var(--ink); }
@@ -250,11 +258,27 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 if (!window.webkit?.messageHandlers?.shareit) document.body.classList.add("browser");
 const nativePost = (m) => window.webkit?.messageHandlers?.shareit?.postMessage(m);
+const IS_NATIVE = !!window.webkit?.messageHandlers?.shareit;
 const nativeCmd = (cmd, files, extra) => {
-  if (!window.webkit?.messageHandlers?.shareit) return false;
+  if (!IS_NATIVE) return false;
   nativePost({cmd, files, ...(extra || {})});
   return true;
 };
+/* acknowledged pasteboard writes — the native side reports writeObjects()'s
+   real result, so a failed write toasts as a failure, never a success */
+let _pbAckId = 0;
+const _pbPending = {};
+window.__pbAck = (id, ok) => { const r = _pbPending[id]; delete _pbPending[id]; r?.(ok); };
+function nativeCmdAck(cmd, files, extra) {
+  if (!IS_NATIVE) return null;
+  const id = ++_pbAckId;
+  const p = new Promise((res) => {
+    _pbPending[id] = res;
+    setTimeout(() => { if (_pbPending[id]) { delete _pbPending[id]; res(true); } }, 1200);
+  });
+  nativePost({cmd, files, ack: id, ...(extra || {})});
+  return p;
+}
 // never alert(): modal dialogs freeze the panel (and automation). inline toast instead
 function toast(msg) {
   let el = $("#toast");
@@ -286,21 +310,54 @@ function smartCopy() {
   const vis = visible();
   const s = vis.find((x) => x.path === expanded) || vis[sel];
   if (!s) return false;
-  copyChat(s);   // ⌘C is always the chat; files have ⇧⌘C and their own button
+  copyContext(s);   // ⌘C = copy context (same as ⏎); files have ⇧⌘C
   return true;
 }
 
-async function copyChat(s) {
+/* Copy context — the local agent-handoff verb. Builds an immutable bundle on
+   disk; the clipboard gets TEXT ONLY (inline markdown when small, else a
+   handoff prompt + path). localOnly: private text + host-only paths must not
+   ride Universal Clipboard. */
+async function copyContext(s) {
   try {
-    const d = await api("/api/copy_chat", {path: s.path, redact: opts.redact});
-    const parts = [`Copied chat`, `${d.messages} messages`];
-    if (d.images) parts.push(`${d.images} image${d.images > 1 ? "s" : ""}`);
-    if (nativeCmd("copyRich", [], {html: d.html, markdown: d.markdown, images: []})) {
-      toast(parts.join(" · "));
+    const d = await api("/api/copy_context", {path: s.path, deep: opts.deep});
+    const ackP = nativeCmdAck("copyText", [], {text: d.text, localOnly: true});
+    if (ackP) {
+      if (!(await ackP)) return toast("Clipboard write failed — try again");
     } else {
-      await copyText(d.markdown);
-      toast("Copied chat as markdown (browser mode)");
+      if (!(await copyText(d.text))) return;
     }
+    const bits = [d.kind === "pointer" ? "Context copied (bundle pointer)" : "Context copied",
+                  `${d.messages} messages`];
+    if (d.images) bits.push(`${d.images} image${d.images > 1 ? "s" : ""}`);
+    if (d.images_skipped) bits.push(`${d.images_skipped} unavailable`);
+    if (opts.deep) bits.push("deep");
+    toast(bits.join(" · "));
+    flashCopied(s.path);
+  } catch (e) { toast(e.message); }
+}
+
+/* Send result — the human verb: last completed answer as rich text + the
+   curated artifact files, one multi-item write. Text fields take the message,
+   attachment-aware apps (Slack, Finder) take the files. */
+async function sendResult(s) {
+  try {
+    const explicit = s._selTouched ? [...(s._sel || [])] : undefined;
+    const d = await api("/api/result", {path: s.path,
+      ...(explicit !== undefined ? {files: explicit} : {})});
+    const n = (d.files || []).length;
+    const ackP = nativeCmdAck("copyRich", d.files || [], {html: d.html, markdown: d.answer, images: []});
+    if (ackP) {
+      if (!(await ackP)) return toast("Clipboard write failed — try again");
+      let msg = n ? `Result + ${n} file${n > 1 ? "s" : ""} copied · chat apps attach the files`
+                  : "Result copied";
+      if (d.skipped?.length) msg += ` · ${d.skipped.length} missing skipped`;
+      toast(msg);
+    } else {
+      await copyText(d.answer);
+      toast(n ? "Result copied (browser mode: message only — files via ⇧⌘C)" : "Result copied");
+    }
+    flashCopied(s.path);
   } catch (e) { toast(e.message); }
 }
 window.__menuCopy = smartCopy;
@@ -309,16 +366,24 @@ window.__menuCopy = smartCopy;
 let menu = null;  // {items, sel, s}
 function closeMenu() { menu = null; $("#menu")?.remove(); $("#submenu")?.remove(); }
 
+const EXPIRY_LABELS = {0: "∞", 24: "1d", 72: "3d", 168: "7d"};
+function toggleDeep() {
+  opts.deep = !opts.deep;
+  if (opts.deep && !localStorage.getItem("shareit-deep-warned")) {
+    localStorage.setItem("shareit-deep-warned", "1");
+    toast("Deep adds reasoning and full tool output — review before sending.");
+  } else {
+    toast(opts.deep ? "Deep mode on" : "Deep mode off");
+  }
+  optsChanged();
+}
+
 function menuItemsFor(s) {
   if (mode === "shares") {
     const sh = visibleShares()[sel];
     if (!sh) return [];
     const items = [
       {t: "Copy Link", k: "⌘C", run: () => { copyText(sh.url); toast("Copied link"); }},
-      {t: "Copy for Agent", run: () => { copyText(
-        "Continue this task from the shared session below. Preserve prior decisions, "
-        + "inspect the included files and begin with the last unresolved request:\n\n" + sh.url);
-        toast("Agent handoff copied"); }},
       {t: "Open", run: () => api("/api/open_url", {url: sh.url}).catch((e) => toast(e.message))},
     ];
     if (sh.provider === "hosted")
@@ -331,39 +396,30 @@ function menuItemsFor(s) {
                   : [...(s.art_list || []), ...(s.read_list || [])];
   const fp = files.map((f) => f.path);
   const nf = files.length;
-  // what ⌘C actually carries: your selection, else the primary deliverable, else everything
   const selPaths = s._sel?.size ? [...s._sel]
     : (s._selTouched ? [] : (p?.primary?.length ? p.primary : fp));
   const nSelM = selPaths.length;
   const base = (q) => q.split("/").pop();
   const payload = nSelM === 1 ? base(selPaths[0]) : `${nSelM} files`;
   const items = [
-    {hdr: "Share link"},
-    {t: "Agent handoff", k: "⏎", run: () => doShare(s, "agent")},
-    {t: "Reader page", run: () => doShare(s, "human")},
-    {t: "Deep (reasoning)", run: () => {
-      if (!localStorage.getItem("shareit-deep-warned")) {
-        localStorage.setItem("shareit-deep-warned", "1");
-        toast("Deep adds reasoning and detailed tool output — review before sending.");
-      }
-      doShare(s, "deep");
-    }},
-    {hdr: "Copy"},
-    {t: "Chat", k: "⌘C", run: () => copyChat(s)},
-    {t: "Last Answer", run: () => copyLastAnswer(s)},
+    {t: "Copy context", k: "⏎", run: () => copyContext(s)},
+    {t: "Share link", k: "⌘L", run: () => doShare(s)},
+    {t: "Send result", k: "⌘R", run: () => sendResult(s)},
   ];
-  if (nf && nSelM) items.push({t: `Files (${payload})`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
-  items.push({t: "Copy as…", sub: [
-    {t: "Markdown file (.md)", run: () => copySession(s, "agent", [])},
-    {t: "Web page (.html)", run: () => copySession(s, "human", [])},
-    {t: `Bundle (chat + ${nf || 0} file${nf === 1 ? "" : "s"})`, run: () => copySession(s, null, fp)},
-    {t: "Last code block only", run: () => copyLastCode(s)},
-  ]});
+  if (nf && nSelM)
+    items.push({t: `Copy files (${payload})`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
+  items.push({sep: 1},
+    {t: `Deep mode: ${opts.deep ? "on" : "off"}`, k: "⌘D", run: toggleDeep},
+    {t: `Link expiry: ${EXPIRY_LABELS[opts.expiry] || "∞"}`, sub:
+      [[0, "forever (∞)"], [24, "1 day"], [72, "3 days"], [168, "7 days"]].map(([h, l]) =>
+        ({t: l + (opts.expiry === h ? "  ✓" : ""), run: () => {
+          opts.expiry = h; optsChanged(); toast(`New links expire: ${EXPIRY_LABELS[h]}`);
+        }}))});
   if (nf && nSelM < nf) items.push({t: `Choose Files… (${nf} total)`, run: () => {
     if (expanded !== s.path) toggle(s);
     s._chipsOpen = true; render();
   }});
-  items.push({hdr: "This session"});
+  items.push({sep: 1});
   const ot = openTargetFor(s);
   if (ot) items.push({t: `Open in ${ot}`, k: "⌥⏎", run: () => doResume(s)});
   items.push({t: "Reveal in Finder", run: () =>
@@ -387,10 +443,10 @@ async function copyLastCode(s) {
   } catch (e) { toast(e.message); }
 }
 
-async function copySession(s, modeOverride, extraFiles) {
-  const m = modeOverride || opts.mode;
+async function copySession(s, modeOverride, extraFiles) {  // legacy export path (unreferenced in v2 UI)
+  const m = modeOverride || (opts.deep ? "deep" : "agent");
   try {
-    const d = await api("/api/export", {path: s.path, mode: m, redact: opts.redact});
+    const d = await api("/api/export", {path: s.path, mode: m});
     const files = [d.file, ...(extraFiles || [])];
     if (nativeCmd("copyFiles", files)) {
       const n = extraFiles && extraFiles.length;
@@ -520,10 +576,13 @@ const rel = (t) => {
 };
 
 let sessions = [], shares = [], stores = [], caps = {}, mode = "list", sel = 0, selPath = null, expanded = null, peekCache = {};
-const opts = Object.assign({ mode: "agent", expiry: 0, redact: true, card: false, adv: false },
-  JSON.parse(localStorage.getItem("shareit-opts-v3") || "{}"));
-if (!["human", "agent", "deep"].includes(opts.mode)) opts.mode = "agent";
-function saveOpts() { localStorage.setItem("shareit-opts-v3", JSON.stringify(opts)); }
+/* v4 options: two knobs only — deep (⌘D) and link expiry (⋯ menu).
+   Scrubbing is always on server-side; the human/agent mode toggle is gone. */
+const _v3 = JSON.parse(localStorage.getItem("shareit-opts-v3") || "{}");
+const opts = Object.assign({ deep: _v3.mode === "deep", expiry: _v3.expiry ?? 0 },
+  JSON.parse(localStorage.getItem("shareit-opts-v4") || "{}"));
+if (![0, 24, 72, 168].includes(opts.expiry)) opts.expiry = 0;
+function saveOpts() { localStorage.setItem("shareit-opts-v4", JSON.stringify(opts)); }
 let optsGen = 0;  // bumps on any option change; stale async results are discarded
 function optsChanged() {  // options affect what a share contains — drop per-row links
   optsGen++;
@@ -600,6 +659,7 @@ function render() {
 let sharesFilter = "all";
 function renderOpts() {
   if (mode === "shares") {
+    $("#opts").style.display = "";
     $("#opts").innerHTML = `<span class="share-meta" style="margin-right:4px">shared links</span>
       ${[["all", "all"], ["chats", "chats"], ["files", "files"], ["expiring", "expiring"]].map(([v, l]) =>
         `<span role="button" tabindex="0" class="tog ${sharesFilter === v ? "on" : ""}" data-sf="${v}">${l}</span>`).join("")}`;
@@ -608,42 +668,10 @@ function renderOpts() {
     }));
     return;
   }
-  $("#opts").innerHTML = `
-    <span role="group" class="seg" data-k="mode">
-      <span role="button" tabindex="0" data-v="human" class="${opts.mode === "human" ? "on" : ""}" title="for people: a clean reader page — conversation + created files, no tool logs">human</span>
-      <span role="button" tabindex="0" data-v="agent" class="${opts.mode === "agent" ? "on" : ""}" title="for agent handoff: markdown with a handoff manifest, abridged tool context + created files">agent</span>
-      <span role="button" tabindex="0" data-v="deep" class="${opts.mode === "deep" ? "on" : ""}" title="maximum context: reasoning, fuller tool output, files it created or changed, plus a manifest of files it read">deep</span>
-    </span>
-    <span role="group" class="seg" data-k="expiry">${[[0,"∞"],[24,"1d"],[72,"3d"],[168,"7d"]].map(([h, l]) =>
-      `<span role="button" tabindex="0" data-v="${h}" class="${opts.expiry === h ? "on" : ""}">${l}</span>`).join("")}</span>
-    <span role="button" tabindex="0" class="tog icon" id="adv" title="more options">⋯</span>
-    ${opts.adv ? `
-    <span role="button" tabindex="0" class="tog icon ${opts.redact ? "on" : ""}" data-t="redact"
-      title="${opts.redact ? "transcript text scrubbed for secrets (files ship as-is) — click to share verbatim" : "NOT scrubbed — click to scrub transcript secrets"}">
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M6 1 10.2 2.6v3C10.2 8.6 8.4 10.3 6 11 3.6 10.3 1.8 8.6 1.8 5.6v-3z"/></svg><span class="lbl">scrub text</span></span></span>
-    <span role="button" tabindex="0" class="tog icon ${opts.card ? "on" : ""}" data-t="card"
-      title="${opts.card ? "stat card copied with the link — click for link only" : "copy a stat card (model · turns · files) with the link"}">
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="1.5" y="2.5" width="9" height="7" rx="1.5"/><path d="M3.5 5h5M3.5 7h3"/></svg><span class="lbl">stat card</span></span>` : ""}
-    ${opts.adv ? '<span role="button" tabindex="0" class="tog icon" id="reset" title="reset options to defaults">↺<span class="lbl">reset</span></span>' : ""}
-    ${opts.redact ? "" : '<span class="warn-note" style="margin-left:auto">⚠ verbatim</span>'}`;
-  $("#adv").addEventListener("click", () => { opts.adv = !opts.adv; saveOpts(); renderOpts(); });
-  $("#reset")?.addEventListener("click", () => {
-    Object.assign(opts, { mode: "agent", expiry: 0, redact: true, card: false, adv: true });
-    optsChanged(); toast("Options reset");
-  });
-  $("#opts").querySelectorAll(".seg span").forEach((el) => el.addEventListener("click", () => {
-    const k = el.parentElement.dataset.k;
-    opts[k] = k === "expiry" ? +el.dataset.v : el.dataset.v;
-    if (opts.mode === "deep" && !localStorage.getItem("shareit-deep-warned")) {
-      localStorage.setItem("shareit-deep-warned", "1");
-      toast("Deep adds reasoning and detailed tool output — review before sending.");
-    }
-    optsChanged();
-  }));
-  $("#opts").querySelectorAll(".tog").forEach((el) => el.addEventListener("click", () => {
-    opts[el.dataset.t] = !opts[el.dataset.t];
-    optsChanged();
-  }));
+  // v2: the options row is gone in list mode — the panel is search + list +
+  // one action bar. Deep/expiry live in the ⋯ menu (⌘K), state shows as chips.
+  $("#opts").innerHTML = "";
+  $("#opts").style.display = "none";
 }
 
 let lastCopied = null;
@@ -662,7 +690,9 @@ function shareBtnHtml(s) {
     const fresh = lastCopied === s.path;
     return `<button class="rowshare${fresh ? " done" : ""}" data-copy="${esc(st.url)}" title="already shared — click to copy the link">${fresh ? "copied ✓" : "copy link"}</button>`;
   }
-  return '<button class="rowshare" data-share="1">share <kbd>⏎</kbd></button>';
+  const fresh = lastCopied === s.path;
+  return `<button class="rowshare${fresh ? " done" : ""}" data-ctx="1"
+    title="copy this session's context for another agent">${fresh ? "copied ✓" : "copy <kbd>⏎</kbd>"}</button>`;
 }
 
 function renderList() {
@@ -702,13 +732,10 @@ function renderList() {
     ? `<span class="brand">Share-It</span><span class="grow"></span><span><kbd>Esc</kbd> clear search</span>`
     : `<span class="brand">Share-It</span><span class="fdiv">${tally}</span>
      <span class="grow"></span><span>${(() => {
+       if (!IS_NATIVE) return `<kbd>⏎</kbd> copy context · click buttons for the rest`;
        const ex = vis.find((x) => x.path === expanded);
-       if (ex?._sel?.size) return `<kbd>⌘C</kbd> copy chat · <kbd>⇧⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌥click</kbd> reveal`;
-       {
-         const cur = vis[sel];
-         const openHint = cur && openTargetFor(cur) ? ` · <kbd>⌥⏎</kbd> open in ${openTargetFor(cur)}` : "";
-         return `<kbd>⌘C</kbd> copy chat · <kbd>⌘K</kbd> actions · <kbd>→</kbd> peek${openHint}`;
-       }
+       if (ex?._sel?.size) return `<kbd>⏎</kbd> copy context · <kbd>⇧⌘C</kbd> copy ${ex._sel.size} file${ex._sel.size > 1 ? "s" : ""} · <kbd>⌘R</kbd> send result`;
+       return `<kbd>⏎</kbd> copy context · <kbd>⌘L</kbd> share link · <kbd>⌘R</kbd> send result · <kbd>⌘K</kbd> more`;
      })()}</span>`;
   const lnk = list.querySelector("#lnk[data-fresh]");
   if (lnk) {  // highlight once, right after creation — not on every re-render
@@ -733,7 +760,7 @@ $("#list").addEventListener("click", (ev) => {
   const rowBtn = t.closest(".rowshare");
   if (rowBtn) {
     if (rowBtn.dataset.copy) { copyText(rowBtn.dataset.copy); flashCopied(s.path); }
-    else doShare(s);
+    else copyContext(s);   // row button = the primary verb, same as ⏎
     return;
   }
   const dots = t.closest("[data-menu]");
@@ -761,7 +788,7 @@ $("#list").addEventListener("click", (ev) => {
     s._sel.has(art.dataset.art) ? s._sel.delete(art.dataset.art) : s._sel.add(art.dataset.art);
     return render();
   }
-  if (t.closest("#chat-copy")) return void copyChat(s);
+  if (t.closest("#chat-copy")) return void copyContext(s);
   if (t.closest("#chips-more")) { s._chipsOpen = !s._chipsOpen; render(); return; }
   if (t.closest("#art-all")) {
     const p = peekCache[s.path];
@@ -782,22 +809,16 @@ $("#list").addEventListener("click", (ev) => {
     return;
   }
   if (t.closest("#resume")) return void doResume(s);
-  if (t.closest("#last-answer")) return void copyLastAnswer(s);
-  const agentBtn = t.closest("[data-agentcopy]");
-  if (agentBtn) {
-    copyText("Continue this task from the shared session below. Preserve prior decisions, "
-      + "inspect the included files and begin with the last unresolved request:\n\n"
-      + agentBtn.dataset.agentcopy);
-    toast("Agent handoff copied");
-    return;
-  }
+  if (t.closest("#act-context")) return void copyContext(s);
+  if (t.closest("#act-share")) return void doShare(s);
+  if (t.closest("#act-result")) return void sendResult(s);
   const openBtn = t.closest("[data-open]");
   if (openBtn) { api("/api/open_url", {url: openBtn.dataset.open}).catch((e) => toast(e.message)); return; }
   const copyBtn = t.closest("[data-copy]");
   if (copyBtn) {
     copyText(copyBtn.dataset.copy); flashCopied(s.path);
     const n = s._share?.n_files;
-    toast(`Copied chat link${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
+    toast(`Link copied${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
     return;
   }
   if (t.closest(".row-line")) { sel = +t.closest(".row").dataset.i; selPath = s.path; toggle(s); }
@@ -866,7 +887,7 @@ function cardHtml(s) {
   const lastBlock = lastTxt ? `<div class="gap" title="conversation continues">⋯</div>
     <div class="msg a last"><i class="${roleCls}">${appShort(s)}</i><span title="this is what ⧉ copy last answer copies">${hi(lastTxt)}</span></div>` : "";
   const chatHdr = `<div class="chathdr"><span>chat</span>
-    <button class="share small ghost" id="chat-copy" title="copy the whole conversation — pastes formatted in Slack/Mail, markdown in editors">copy chat <kbd class="ghostkey">⌘C</kbd></button></div>`;
+    <button class="share small ghost" id="chat-copy" title="copy the full context for another agent — inline when small, else bundle + path">copy context ${IS_NATIVE ? '<kbd class="ghostkey">⏎</kbd>' : ""}</button></div>`;
   const peek = !p ? '<div class="peekbox"><div class="peek"><div class="msg"><span class="share-meta">Loading preview…</span></div></div></div>'
     : `<div class="peekbox">${chatHdr}<div class="peek">${head + lastBlock
       || '<div class="msg"><span class="share-meta">no readable messages</span></div>'}</div></div>`;
@@ -918,19 +939,27 @@ function cardHtml(s) {
         nAll > nPrim ? `+${nAll - nPrim} other file${nAll - nPrim > 1 ? "s" : ""}` : null
       ].filter(Boolean).join(" · ")}</div>` : "";
   const openTarget = openTargetFor(s);
-  const resume = `<div class="ctl">${openTarget ? `<button class="actbtn" id="resume"
-    title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</button>` : ""}
-    <button class="actbtn" id="last-answer" title="copy the final assistant response">⧉ Copy last answer</button></div>`;
+  // v2 action bar: the three verbs + open, with deep/expiry state visible
+  const kbd = (k) => IS_NATIVE ? ` <kbd class="ghostkey">${k}</kbd>` : "";
+  const actions = `<div class="ctl actbar">
+    <button class="actbtn primary" id="act-context"
+      title="full context for another agent on this Mac — inline when small, else an immutable bundle + path (text only)">Copy context${kbd("⏎")}</button>
+    <button class="actbtn" id="act-share"
+      title="same context as a hosted link for an agent on another device · expiry ${EXPIRY_LABELS[opts.expiry] || "∞"} (change in ⌘K)">Share link <span class="dimlbl">${EXPIRY_LABELS[opts.expiry] || "∞"}</span>${kbd("⌘L")}</button>
+    <button class="actbtn" id="act-result"
+      title="last completed answer as a rich message + the deliverable files — for Slack, email, LinkedIn">Send result${kbd("⌘R")}</button>
+    ${openTarget ? `<button class="actbtn" id="resume"
+      title="reopen this session where it lives (⌥⏎)"><span class="applogo">${appLogo(s)}</span>${openTarget}</button>` : ""}
+    ${opts.deep ? '<span class="chip-deep" title="deep mode: full tool output + reasoning ship (⌘D toggles)">deep</span>' : ""}
+  </div>`;
   const st = s._share;
   const linkGlyph = '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5 7l3.5-3.5M4 5H2.8A1.8 1.8 0 0 0 2.8 8.6H4M8 3.4h1.2a1.8 1.8 0 0 1 0 3.6H8"/></svg>';
   const link = st && st.url ? `
-    ${opts.card && st.card ? `<div class="cardline">${esc(st.card)}</div>` : ""}
-    <div class="linkrow"><span class="share-meta" title="link to the whole session">${linkGlyph} session</span>
+    <div class="linkrow"><span class="share-meta" title="context link — an agent can fetch the session markdown directly">${linkGlyph} context link</span>
       <input readonly value="${esc(st.url)}" id="lnk"${st.fresh ? ' data-fresh="1"' : ""}>
-      ${expiryLabel(st)}<button class="iconbtn" data-copy="${esc(opts.card && st.card ? st.card + "\n" + st.url : st.url)}">copy</button>
-      ${st.mode !== "human" ? `<button class="iconbtn" data-agentcopy="${esc(st.url)}" title="copy an instruction + link for another agent">for agent</button>` : ""}
+      ${expiryLabel(st)}<button class="iconbtn" data-copy="${esc(st.url)}">copy</button>
       <button class="iconbtn" data-open="${esc(st.url)}">open</button></div>` : "";
-  return `<div class="card">${peek}${arts || catNote}${truth}${link}${resume}</div>`;
+  return `<div class="card">${peek}${arts || catNote}${truth}${link}${actions}</div>`;
 }
 
 async function fetchPeek(s) {
@@ -1033,12 +1062,12 @@ async function doShareArtifact(s, file) {
 
 async function doShare(s, modeOverride) {
   if (!s || s._share === "busy") return;
-  const wantMode = modeOverride || opts.mode;
+  const wantMode = modeOverride || (opts.deep ? "deep" : "agent");
   // #9: a cached link is only reusable if it was built for THIS mode + files
   if (s._share?.url && !modeOverride && s._share.mode === wantMode && !s._selTouched) {
     copyText(s._share.url);
     const n = s._share.n_files;
-    toast(`Copied chat link${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
+    toast(`Link copied${n ? ` · ${n} file${n > 1 ? "s" : ""}` : ""}`);
     return;
   }
   s._share = "busy"; render();
@@ -1046,14 +1075,17 @@ async function doShare(s, modeOverride) {
   try {
     // #8: only override mode defaults when the user actually picked files
     const selFiles = (peekCache[s.path] && s._selTouched) ? [...(s._sel || [])] : undefined;
-    const d = await api("/api/share", {path: s.path, redact: opts.redact,
-      mode: modeOverride || opts.mode, expires_hours: opts.expiry,
+    const d = await api("/api/share", {path: s.path,
+      mode: wantMode, expires_hours: opts.expiry,
       ...(selFiles ? {files: selFiles} : {})});
     if (gen !== optsGen) { s._share = null; render(); return; }  // options changed mid-flight
-    s._share = {url: d.url, provider: d.provider, expires: d.expires, card: d.card,
+    s._share = {url: d.url, provider: d.provider, expires: d.expires,
                 n_files: d.n_files || 0, mode: wantMode, fresh: true};
-    copyText(opts.card && d.card ? `${d.card}\n${d.url}` : d.url);
-    toast(`Copied chat link${d.n_files ? ` · ${d.n_files} file${d.n_files > 1 ? "s" : ""}` : ""}`);
+    copyText(d.url);
+    const bits = [`Link copied`];
+    if (d.n_files) bits.push(`${d.n_files} file${d.n_files > 1 ? "s" : ""}`);
+    if (d.images_skipped) bits.push(`${d.images_skipped} image${d.images_skipped > 1 ? "s" : ""} unavailable`);
+    toast(bits.join(" · "));
     flashCopied(s.path);
     if (expanded !== s.path) toggle(s);  // reveal the link row
     return;
@@ -1271,7 +1303,22 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();  // otherwise the search input beeps
     const s = vis[sel];
     if (e.altKey) { if (s && openTargetFor(s)) doResume(s); }
-    else doShare(s);  // ⏎ is always session+files; files-only lives on its own button
+    else copyContext(s);   // ⏎ = the primary verb: copy context
+  }
+  else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "l"
+           && mode === "list") {
+    e.preventDefault();
+    doShare(vis[sel]);     // ⌘L = share link (native shell only owns this combo)
+  }
+  else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "r"
+           && mode === "list") {
+    e.preventDefault();
+    if (vis[sel]) sendResult(vis[sel]);   // ⌘R = send result
+  }
+  else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "d"
+           && mode === "list") {
+    e.preventDefault();
+    toggleDeep();          // ⌘D = deep toggle
   }
   else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "c"
            && mode === "list") {
@@ -1284,7 +1331,7 @@ document.addEventListener("keydown", (e) => {
       : p?.primary?.length ? p.primary
       : [...(s.art_list || []), ...(s.read_list || [])].map((f) => f.path);
     if (files.length) copyFilesOnly(s, files);
-    else copyLastAnswer(s);
+    else toast("No files in this session");   // no silent fallback to the answer
   }
   else if (e.key === "ArrowRight" && mode === "list") { toggle(vis[sel]); e.preventDefault(); }
   else if (e.key === "Escape") {
