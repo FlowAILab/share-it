@@ -1116,6 +1116,9 @@ _TEMPISH = re.compile(
 
 _MD_LOCAL_LINK = re.compile(r"\[([^\]\n]+)\]\((/[^)\s]+|~/[^)\s]+|file://[^)\s]+)\)")
 _BARE_LOCAL = re.compile(r"(?<![\w./])(?:/Users/[^\s`)\]]+|~/[^\s`)\]]+)")
+# spans the bare-path shortener must NOT touch: fenced/inline code and real URLs
+_PROTECT = re.compile(r"```.*?```|`[^`\n]+`|(?:https?|file|ftp)://\S+", re.DOTALL)
+_ATTACH_TAIL = re.compile(r"\n*📎 Attached:[^\n]*\Z")
 
 
 def _clean_result_message(text, files):
@@ -1125,16 +1128,27 @@ def _clean_result_message(text, files):
     real files ride the clipboard as attachments. So: drop the URL from
     markdown links that point at a local path (keep the label), shorten any
     bare local path to its basename, then append a clean 'Attached: …' line
-    listing what's actually on the clipboard."""
+    listing what's actually on the clipboard. Code blocks and real URLs are
+    left verbatim (a path inside a shell command or a link is meaningful)."""
     def _mdsub(m):
         label, target = m.group(1), m.group(2)
         if target.startswith(("http://", "https://", "mailto:")):
             return m.group(0)      # real links stay
         return label                # dead local link → just its label
     text = _MD_LOCAL_LINK.sub(_mdsub, text)
-    text = _BARE_LOCAL.sub(lambda m: os.path.basename(m.group(0).rstrip("/")), text)
+
+    # shorten bare local paths, but never inside code spans or URLs
+    stash = []
+    def _hide(m):
+        stash.append(m.group(0))
+        return f"\x00{len(stash) - 1}\x00"
+    tmp = _PROTECT.sub(_hide, text)
+    tmp = _BARE_LOCAL.sub(lambda m: os.path.basename(m.group(0).rstrip("/")), tmp)
+    text = re.sub(r"\x00(\d+)\x00", lambda m: stash[int(m.group(1))], tmp)
+
     if files:
         names = ", ".join(os.path.basename(f) for f in files)
+        text = _ATTACH_TAIL.sub("", text.rstrip())   # idempotent: drop any prior tail
         text = text.rstrip() + f"\n\n📎 Attached: {names}"
     return text
 

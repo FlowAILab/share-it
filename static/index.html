@@ -467,27 +467,45 @@ async function copyContext(s) {
   } catch (e) { toast(e.message); }
 }
 
-/* Send result — the human verb: last completed answer as rich text + the
-   curated artifact files, one multi-item write. Text fields take the message,
-   attachment-aware apps (Slack, Finder) take the files. */
+/* Send result — the human verb. macOS won't let one ⌘V deliver BOTH text and
+   files to a compose box: a text flavor on the clipboard makes chat/mail paste
+   the text and ignore the files (the Pavlov trap). So the two are split:
+     ⌘R  → the deliverable files ALONE, so ⌘V actually attaches them anywhere.
+     ⌥⌘R → the write-up as text, for the message box.
+   With no files to send, ⌘R falls back to the write-up. */
 async function sendResult(s, textOnly) {
   try {
     const explicit = s._selTouched ? [...(s._sel || [])] : undefined;
     const d = await api("/api/result", {path: s.path,
       ...(explicit !== undefined ? {files: explicit} : {})});
-    const n = textOnly ? 0 : (d.files || []).length;
-    const ackP = nativeCmdAck("copyRich", textOnly ? [] : (d.files || []),
-                              {html: d.html, markdown: d.answer, images: []});
+    const files = d.files || [];
+
+    if (textOnly || files.length === 0) {   // the write-up, as text
+      const ackP = nativeCmdAck("copyRich", [], {html: d.html, markdown: d.answer, images: []});
+      if (ackP) {
+        if (ackFailed(await ackP)) return toast("Clipboard write failed — try again");
+      } else if (!(await copyText(d.answer))) return;
+      toast(textOnly || files.length === 0
+        ? "Write-up copied — paste as your message"
+        : "Write-up copied");
+      flashCopied(s.path);
+      return;
+    }
+
+    // ⌘R — the files must ATTACH, so send them alone (no competing text flavor)
+    const ackP = nativeCmdAck("copyFiles", files);
     if (ackP) {
       if (ackFailed(await ackP)) return toast("Clipboard write failed — try again");
-      let msg = n ? `Copied: last message + ${n} file${n > 1 ? "s" : ""}`
-                  : "Copied: last message";
-      if (d.skipped?.length) msg += ` · ${d.skipped.length} missing skipped`;
-      toast(msg);
     } else {
-      if (!(await copyText(d.answer))) return;
-      toast("Copied: last message" + (n ? " (browser mode — files via ⇧⌘C)" : ""));
+      try {
+        const r = await api("/api/file/copy", {path: s.path, files});
+        if (!r.ok) return toast("Clipboard write failed — try again");
+      } catch (e) { return toast(e.message); }
     }
+    const n = files.length;
+    let msg = `${n} file${n > 1 ? "s" : ""} ready — ⌘V attaches ${n > 1 ? "them" : "it"} · ⌥⌘R for the write-up`;
+    if (d.skipped?.length) msg += ` · ${d.skipped.length} missing skipped`;
+    toast(msg);
     flashCopied(s.path);
   } catch (e) { toast(e.message); }
 }
@@ -539,8 +557,8 @@ function menuItemsFor(s) {
   const items = [
     {t: "Copy context", k: "⏎", run: () => copyContext(s)},
     {t: "Share link", k: "⌘L", run: () => doShare(s)},
-    {t: "Send result", k: "⌘R", run: () => sendResult(s)},
-    {t: "Send result as message", k: "⌥⌘R", run: () => sendResult(s, true)},
+    {t: nf ? "Send result — files attach" : "Send result", k: "⌘R", run: () => sendResult(s)},
+    {t: "Send result — as message", k: "⌥⌘R", run: () => sendResult(s, true)},
   ];
   if (nf && nSelM)
     items.push({t: `Copy files (${payload})`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
@@ -1247,14 +1265,17 @@ function scrollToFilesIfWanted() {
   const arts = $("#list") && $("#list").querySelector(".row.exp .arts");
   if (arts) { arts.scrollIntoView({block: "nearest"}); _scrollFilesFor = null; }
 }
+function setExpanded(v) {   // single gate for `expanded` — any change away drops a pending files-scroll
+  if (_scrollFilesFor && _scrollFilesFor !== v) _scrollFilesFor = null;
+  expanded = v;
+}
 function scrollChatEnd() {
   const pk = $("#list")?.querySelector(".card .peek");
   if (pk) pk.scrollTop = pk.scrollHeight;   // latest message in view, like a chat
 }
 async function toggle(s) {
   if (!s) return;
-  expanded = expanded === s.path ? null : s.path;
-  if (_scrollFilesFor && _scrollFilesFor !== expanded) _scrollFilesFor = null;   // stale target
+  setExpanded(expanded === s.path ? null : s.path);
   if (expanded) noteRecent(s.path);         // opening a session counts as recent
   _wantScroll = true;
   render();
@@ -1466,7 +1487,7 @@ async function sharesClick(ev) {
 async function loadShares() { shares = (await api("/api/shares")).shares; }
 
 $("#q").addEventListener("input", () => {
-  sel = 0; selPath = null; expanded = null;   // ⏎ must act on the TOP result
+  sel = 0; selPath = null; setExpanded(null);   // ⏎ must act on the TOP result
   refreshPins();
   $("#q-clear").classList.toggle("show", !!$("#q").value);
   if (mode === "list") queueSearch();
@@ -1622,11 +1643,11 @@ document.addEventListener("keydown", (e) => {
   }
   else if (e.key === "ArrowLeft" && mode === "list") {
     e.preventDefault();
-    if (expanded) { expanded = null; _wantScroll = true; render(); }   // left goes back out
+    if (expanded) { setExpanded(null); _wantScroll = true; render(); }   // left goes back out
   }
   else if (e.key === "Escape") {
     e.preventDefault();  // no system beep
-    if (expanded) { expanded = null; render(); }
+    if (expanded) { setExpanded(null); render(); }
     else if (mode === "shares") { mode = "list"; $("#btn-shares").classList.remove("on"); render(); }
     else if ($("#q").value) { $("#q").value = ""; $("#q-clear").classList.remove("show"); contentHits = []; render(); }
     else if (srcFilter !== "all") { srcFilter = "all"; sel = 0; render(); }
