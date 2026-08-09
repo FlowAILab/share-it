@@ -639,6 +639,7 @@ function openSub(item, anchorEl) {
   const w = el.getBoundingClientRect().width;
   const flipLeft = r.right + w > innerWidth - 10;  // not enough room on the right
   placeMenu(el, flipLeft ? r.left + 4 : r.right - 4, r.top, flipLeft);
+  el.querySelector(".mi")?.focus?.();   // Enter chooses an option, not reopens
   el.addEventListener("click", (ev) => {
     const mi = ev.target.closest("[data-mi]");
     if (mi) { const it = item.sub[+mi.dataset.mi]; closeMenu(); it.run(); }
@@ -649,16 +650,25 @@ document.addEventListener("click", (ev) => {
   if (menu && !ev.target.closest("#menu") && !ev.target.closest("#submenu") && !ev.target.closest("[data-menu]")) closeMenu();
 }, true);
 document.addEventListener("keydown", (ev) => {
-  const pop = $("#submenu") || $("#menu");   // submenu takes precedence
+  const sub = $("#submenu"), pop = sub || $("#menu");   // submenu takes precedence
   if (!pop) return;
-  if (!["ArrowDown", "ArrowUp", "Enter", " ", "Escape", "Tab"].includes(ev.key)) return;
+  if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Enter", " ", "Escape", "Tab"].includes(ev.key)) return;
   ev.preventDefault(); ev.stopPropagation();
   const mis = [...pop.querySelectorAll(".mi")];
   const cur = mis.indexOf(document.activeElement);
-  if (ev.key === "ArrowDown") mis[Math.min(cur + 1, mis.length - 1)]?.focus();
-  else if (ev.key === "ArrowUp") mis[Math.max(cur < 0 ? 0 : cur - 1, 0)]?.focus();
+  if (ev.key === "ArrowDown") mis[Math.min(cur + 1, mis.length - 1) < 0 ? 0 : Math.min(cur + 1, mis.length - 1)]?.focus();
+  else if (ev.key === "ArrowUp") mis[Math.max(cur - 1, 0)]?.focus();
+  else if (ev.key === "ArrowRight" && !sub) {
+    const mi = document.activeElement?.closest?.(".mi");
+    const it = mi && menu?.items?.[+mi.dataset.mi];
+    if (it?.sub) openSub(it, mi);
+  }
+  else if (ev.key === "ArrowLeft" && sub) { sub.remove(); menu.sub = null; $("#menu .mi.has-sub")?.focus?.(); }
   else if (ev.key === "Enter" || ev.key === " ") (document.activeElement?.closest?.(".mi") || mis[0])?.click();
-  else if (ev.key === "Escape" || ev.key === "Tab") closeMenu();
+  else if (ev.key === "Escape" || ev.key === "Tab") {
+    if (sub) { sub.remove(); menu.sub = null; $("#menu .mi.has-sub")?.focus?.(); }
+    else closeMenu();
+  }
 }, true);
 
 
@@ -964,6 +974,8 @@ function renderList() {
   const cur = list.querySelector(".row.sel");
   if (cur && _wantScroll) cur.scrollIntoView({block: "nearest"});
   _wantScroll = false;
+  const expNow = vis.find((x) => x.path === expanded);
+  if (expNow) scrollToFilesIfWanted(expNow);
 }
 
 /* one delegated listener — survives every re-render, no stale handlers */
@@ -979,10 +991,11 @@ $("#list").addEventListener("click", (ev) => {
   const resumeGlyph = t.closest("[data-resume]");
   if (resumeGlyph) { hideTip(); doResume(s); return; }       // app glyph opens the session
   const filesBtn = t.closest("[data-files]");
-  if (filesBtn) {   // amber count pill → expand + jump to files (never collapse)
+  if (filesBtn) {   // amber count pill -> expand + jump to files (never collapse)
     hideTip();
+    s._scrollFiles = true;
     if (expanded !== s.path) { _wantScroll = true; toggle(s); }
-    setTimeout(() => $("#list").querySelector(".row.exp .arts")?.scrollIntoView({block: "nearest"}), 90);
+    else scrollToFilesIfWanted(s);
     return;
   }
   const msgIcon = t.closest("[data-msg]");
@@ -1229,6 +1242,11 @@ async function fetchPeek(s) {
   catch { peekCache[s.path] = {messages: [{role: "assistant", text: "unreadable"}], artifacts: []}; }
 }
 
+function scrollToFilesIfWanted(sess) {
+  if (!sess || !sess._scrollFiles) return;
+  const arts = $("#list") && $("#list").querySelector(".row.exp .arts");
+  if (arts) { arts.scrollIntoView({block: "nearest"}); sess._scrollFiles = false; }
+}
 function scrollChatEnd() {
   const pk = $("#list")?.querySelector(".card .peek");
   if (pk) pk.scrollTop = pk.scrollHeight;   // latest message in view, like a chat
