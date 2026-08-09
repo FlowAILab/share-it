@@ -382,6 +382,30 @@ except (ValueError, OSError):
     dev_ok = True
 ck("/dev/zero refused by regular-file gate", dev_ok)
 
+
+# ---- fingerprint caller never opens forbidden refs (instrumented open) ------
+import builtins
+app_mod._effective_files = lambda sess, opts: []
+class _StubAd:
+    def parse(self, p):
+        return [{"role": "user", "text": "x",
+                 "media_refs": [{"path": "/etc/hosts", "structured": False},
+                                {"path": "/etc/hosts", "structured": True}]}]
+app_mod.adapters.by_id = lambda src: _StubAd()
+_real_open = builtins.open
+_opened = []
+def _spy(path, *a, **k):
+    if isinstance(path, str) and path.startswith("/etc/"):
+        _opened.append(path)
+    return _real_open(path, *a, **k)
+builtins.open = _spy
+try:
+    app_mod._artifact_fingerprint({"source": "codex", "path": "/x/f.jsonl",
+                                   "title": "t", "mtime": 1.0}, {"files": None})
+finally:
+    builtins.open = _real_open
+ck("fingerprint never opens forbidden refs", not _opened, _opened)
+
 print()
 if FAIL:
     print(f"{len(FAIL)} FAILURES: {FAIL}")

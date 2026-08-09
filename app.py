@@ -298,16 +298,14 @@ def _artifact_fingerprint(session, opts):
             parts.append(f"{a['path']}:missing")
     try:
         msgs = adapters.by_id(session["source"]).parse(session["path"])
-        for m in msgs:
-            for r in m.get("media_refs") or []:
-                p = r.get("path") or ""
-                try:
-                    # same validation gate as sharing — a forbidden ref is
-                    # NEVER opened here (no /dev/zero hangs, no exfil probes)
-                    data, _mt = bundle.read_ref(r, remote=True)
-                    parts.append(f"ref:{p}:{hashlib.sha256(data).hexdigest()}")
-                except (OSError, ValueError):
-                    parts.append(f"ref:{p}:refused")
+        # run the EXACT share-time resolution (provenance, containment, count
+        # cap, metadata strip) and hash what it yields — the fingerprint is
+        # exactly the media a share would upload, and forbidden or over-cap
+        # refs are never opened
+        media_objs, skipped = bundle.resolve_media(msgs, remote=True)
+        for o in media_objs:
+            parts.append(f"media:{o['name']}:{hashlib.sha256(o['data']).hexdigest()}")
+        parts.append(f"media_skipped:{skipped}")
     except Exception:
         pass
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]

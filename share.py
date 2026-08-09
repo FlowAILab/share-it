@@ -140,8 +140,12 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
     del_key = secrets.token_urlsafe(16)  # set before _abort so rollback carries it
     from concurrent.futures import ThreadPoolExecutor
 
+    fault = os.environ.get("SHAREIT_FAULT", "")   # test hook: "put" | "commit"
+
     def put(o):
         try:
+            if fault == "put" and o["name"] != index_name:
+                return o["name"]   # deterministic mid-upload failure (tests)
             status, _ = _bundle_call(f"/bundle/{bundle_id}/{o['name']}", data=o["data"],
                                      headers={"Content-Type": o["content_type"],
                                               "Content-Length": str(len(o["data"]))})
@@ -166,6 +170,8 @@ def upload_bundle(objects, index_name, expires_hours=EXPIRES_HOURS, bundle_id=No
             _abort(f"upload failed for: {', '.join(failed)}")
         manifest = {"index": index_name, "hours": expires_hours, "delKey": del_key,
                     "objects": [{"name": o["name"], "size": len(o["data"])} for o in objects]}
+        if fault == "commit":
+            _abort("commit failed (injected fault)")
         status, body = _bundle_call(f"/bundle/{bundle_id}/commit",
                                     data=json.dumps(manifest).encode(),
                                     headers={"Content-Type": "application/json"})
