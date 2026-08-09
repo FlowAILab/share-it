@@ -34,7 +34,7 @@ def msgs_basic():
 built = bundle.build(SESSION, msgs_basic())
 kind, text = bundle.compose_clipboard(SESSION, built, [])
 ck("small session → inline", kind == "inline")
-ck("inline carries bundle footer", "Full bundle" in text and built["md_path"] in text)
+ck("inline carries file pointer footer", "Full session on disk" in text and built["md_path"] in text)
 
 big = msgs_basic()
 big[0]["text"] = "🦆" * 6000   # multibyte: 4 bytes/char → ~24KB, chars ~6k
@@ -43,7 +43,9 @@ kind2, text2 = bundle.compose_clipboard(SESSION, built2, [{"path": "/proj/out.pd
 ck("multibyte payload over 16KiB → pointer (byte-measured)", kind2 == "pointer", kind2)
 ck("pointer names the md path", built2["md_path"] in text2)
 ck("pointer lists artifacts", "/proj/out.pdf" in text2)
-ck("pointer notes retention lease", "7 days" in text2)
+ck("pointer is neutral (no continue/retention noise)",
+   "continue" not in text2.lower() and "7 day" not in text2.lower()
+   and "Context of a" in text2, text2[:80])
 
 # ---- generations: immutable, distinct, atomic -------------------------------
 ck("distinct generations per build", built["dir"] != built2["dir"])
@@ -300,12 +302,11 @@ tb, _ = bundle.render_transcript(SESSION, manym, deep=False, global_cap=100)
 ck("sub-notice cap (100B) holds", len(tb.encode()) <= 100, len(tb.encode()))
 pad_doc = bundle.build(SESSION, [{"role": "user", "text": "q"},
                                  {"role": "assistant", "text": "a", "stop": "end_turn"}])
-room = bundle.INLINE_LIMIT - len((pad_doc["doc"] + "\n---\nFull bundle (kept ≥7 days): "
-                                  + pad_doc["md_path"] + "\n").encode())
-k_at, _t1 = bundle.compose_clipboard(SESSION, pad_doc, [], inline_limit=len(
-    (pad_doc["doc"] + "\n---\nFull bundle (kept ≥7 days): " + pad_doc["md_path"] + "\n").encode()))
-k_under, _t2 = bundle.compose_clipboard(SESSION, pad_doc, [], inline_limit=len(
-    (pad_doc["doc"] + "\n---\nFull bundle (kept ≥7 days): " + pad_doc["md_path"] + "\n").encode()) - 1)
+FOOTER = "\n---\nFull session on disk: " + pad_doc["md_path"] + "\n"
+k_at, _t1 = bundle.compose_clipboard(SESSION, pad_doc, [],
+    inline_limit=len((pad_doc["doc"] + FOOTER).encode()))
+k_under, _t2 = bundle.compose_clipboard(SESSION, pad_doc, [],
+    inline_limit=len((pad_doc["doc"] + FOOTER).encode()) - 1)
 ck("payload == limit → inline", k_at == "inline", k_at)
 ck("payload == limit+1 → pointer", k_under == "pointer", k_under)
 

@@ -346,7 +346,7 @@ def header_md(session, messages, artifacts, reads, deep=False, remote=False,
     n_msgs = sum(1 for m in messages if m["role"] in ("user", "assistant")
                  and (m.get("text") or "").strip())
     n_tools = sum(1 for m in messages if m["role"] == "tool")
-    lines = [f"# Handoff — {title}", "",
+    lines = [f"# Session context — {title}", "",
              f"Source: {src} · Date: {date}"
              + (f" · cwd: `{os.path.basename(cwd) if remote else cwd}`" if cwd else "")
              + (f" · {expiry_label}" if expiry_label else ""),
@@ -379,8 +379,7 @@ def header_md(session, messages, artifacts, reads, deep=False, remote=False,
     referenced = [a for a in artifacts if a.get("kind") == "referenced"]
     if created or modified:
         lines += ["## Files this session created or modified"
-                  + (" (raw file contents — not redacted)" if remote
-                     else " — work on these directly, not copies"), ""]
+                  + (" (raw file contents — not redacted)" if remote else ""), ""]
         for a in created + modified:
             lines.append(entry(a))
         lines.append("")
@@ -569,21 +568,22 @@ def compose_clipboard(session, built, artifacts, inline_limit=INLINE_LIMIT):
     art_lines = [f"  {a['path']}" for a in (artifacts or [])[:8]]
 
     inline = (built["doc"].replace(_MEDIA_TOKEN, built["dir"] + "/media")
-              + f"\n---\nFull bundle (kept ≥7 days): {built['md_path']}\n")
+              + f"\n---\nFull session on disk: {built['md_path']}\n")
     if _b(inline) <= inline_limit:
         return "inline", inline
 
-    lines = [f"Continue from a previous {src} session — \"{title}\" ({date}).",
-             f"Full transcript incl. tool calls: {shlex.quote(built['md_path'])}"]
+    # Neutral, non-directive: just describe what's in the file. No "continue",
+    # no retention noise — the receiving agent decides what to do with it.
+    lines = [f"Context of a {src} session — \"{title}\" ({date}).",
+             f"Full transcript (messages + tool calls) is in this file:",
+             f"{shlex.quote(built['md_path'])}"]
     if built["images"]:
-        lines.append(f"Pasted screenshots ({built['images']}): "
+        lines.append(f"Screenshots ({built['images']}) are in "
                      f"{shlex.quote(os.path.join(built['dir'], 'media'))}/ "
-                     "(referenced inline; view them with your image-capable Read tool)")
+                     "— referenced inline; open with an image-capable reader.")
     if art_lines:
-        lines.append("Files that session created (work on these directly, not copies):")
+        lines.append("Files this session created:")
         lines += art_lines
-    lines += ["Read the transcript first, then continue where it left off.",
-              "(Bundle is immutable and kept at least 7 days.)"]
     return "pointer", render.redact("\n".join(lines)) + "\n"
 
 
