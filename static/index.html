@@ -746,6 +746,14 @@ let _pinnedRecents = null;   // frozen recents order — stable while you use th
 let _scrollFilesFor = null;   // path whose file chips we should scroll to once they render
 function refreshPins() { _pinnedRecents = null; }   // next visible() recomputes
 let TERMS = [];
+const TERM_KEY = "shareit-term";   // sticky terminal choice for resume
+function savedTerm() {
+  try {
+    const t = localStorage.getItem(TERM_KEY) || "";
+    return TERMS.some((x) => x.name === t) ? t : "";   // ignore uninstalled leftovers
+  } catch { return ""; }
+}
+function saveTerm(t) { try { localStorage.setItem(TERM_KEY, t); } catch {} }
 const I_TERM = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.2" y="2" width="11.6" height="10" rx="2"/><path d="M3.6 5.4 5.8 7.2 3.6 9M6.8 9.4h3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const I_FOLDER = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M1.4 3.6a1.2 1.2 0 0 1 1.2-1.2h2.6l1.4 1.5h4.8a1.2 1.2 0 0 1 1.2 1.2v5.3a1.2 1.2 0 0 1-1.2 1.2H2.6a1.2 1.2 0 0 1-1.2-1.2z"/></svg>';
 function selectedFilePaths(s) {   // the ONE source of truth for ⇧⌘C + menu
@@ -1077,6 +1085,10 @@ $("#list").addEventListener("click", (ev) => {
   if (t.closest("[data-odir]")) {
     const od = t.closest("[data-odir]").dataset.odir;
     if (od === "app") doResume(s);
+    else if (od !== "finder" && openTargetFor(s)) {
+      // terminal pick on a resumable session → RESUME there, and remember it
+      saveTerm(od); doResume(s, od);
+    }
     else api("/api/open_dir", {path: s.path, target: od})
       .then((d) => toast(d.ok ? `Opened in ${od === "finder" ? "Finder" : od}` : "Couldn't open folder"))
       .catch((e) => toast(e.message));
@@ -1227,17 +1239,20 @@ function cardHtml(s) {
       ${expiryLabel(st)}<button class="iconbtn" data-copy="${esc(st.url)}" data-tip="Copy link">copy</button>
       <button class="iconbtn" data-open="${esc(st.url)}" data-tip="Open in browser">open</button></div>` : "";
 
-  // ONE primary action, right-aligned: Open in <app> ▾ (folder/terminals in the caret)
+  // ONE primary action, right-aligned: Open in <app> ▾. For resumable sessions
+  // the caret's terminal entries RESUME there (and become the sticky default);
+  // for others they just open the project folder.
+  const stickyTerm = openTarget ? savedTerm() : "";
   const openOpts = s._openOpts ? `<div class="openopts">
     ${openTarget ? `<button class="actbtn" data-odir="app"><span class="applogo">${appLogo(s)}</span>${openTarget}</button>` : ""}
     <button class="actbtn" data-odir="finder">${I_FOLDER} Finder</button>
-    ${TERMS.map((tm) => `<button class="actbtn" data-odir="${esc(tm.name)}">${I_TERM} ${esc(tm.label)}</button>`).join("")}
+    ${TERMS.map((tm) => `<button class="actbtn" data-odir="${esc(tm.name)}"${openTarget ? ` data-tip="Resume here — becomes the default"` : ""}>${I_TERM} ${esc(tm.label)}${stickyTerm === tm.name ? " ✓" : ""}</button>`).join("")}
   </div>` : "";
   const footer = `<div class="cardfoot">
     <span class="foot-meta">${opts.deep ? '<span class="chip-deep" data-tip="Deep mode on|⌘D">deep</span>' : ""}</span>
     <span class="openin-wrap">
       ${openTarget
-        ? `<button class="actbtn primary" id="resume" data-tip="Reopen this session|⌥⏎"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</button>`
+        ? `<button class="actbtn primary" id="resume" data-tip="Reopen this session${stickyTerm ? ` in ${esc(stickyTerm)}` : ""}|⌥⏎"><span class="applogo">${appLogo(s)}</span>Open in ${openTarget}</button>`
         : `<button class="actbtn primary" id="openin-caret2" data-tip="Open folder">Open ▾</button>`}
       ${openTarget ? '<button class="actbtn primary caret" id="openin-caret" data-tip="Open in…">▾</button>' : ""}
     </span>
@@ -1304,12 +1319,18 @@ function openTargetFor(s) {
 }
 function appLogo(s) { return GLYPHS[s.app] || GLYPHS._fallback; }
 
-async function doResume(s) {
+async function doResume(s, term) {
   try {
-    const d = await api("/api/resume", {path: s.path});
+    // explicit pick wins; otherwise a terminal-based session (Claude Code)
+    // reuses the remembered choice — pick Warp once, it's Warp from then on
+    const sticky = term || (openTargetFor(s) === "Claude Code" ? savedTerm() : "");
+    const body = {path: s.path};
+    if (sticky) body.terminal = sticky;
+    if (term) body.app = false;          // explicit terminal beats the app deep link
+    const d = await api("/api/resume", body);
     if (d.app) toast("Opening in " + (d.target || "the app"));
-    else if (d.launched) toast("Opened in Terminal");
-    else if (await copyText(d.command)) toast("Command copied — paste in your terminal");
+    else if (d.launched) toast(`Resumed in ${d.terminal || "Terminal"}`);
+    else if (await copyText(d.command)) toast(`Command copied — paste in ${d.terminal || "your terminal"}`);
   } catch (e) { toast(e.message); }
 }
 

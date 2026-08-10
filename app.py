@@ -289,6 +289,45 @@ def _open_in_terminal(cmd, cwd):
         return False, None
 
 
+def _yaml_dq(s):
+    """YAML double-quoted scalar — backslash and quote escapes are sufficient."""
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _resume_in_warp(cmd, cwd):
+    """Run cmd in a new Warp window via a launch configuration — the only way
+    Warp runs a command on open (no AppleScript surface, no TCC prompt).
+    Warp re-reads the yaml on every warp://launch, so one file is overwritten."""
+    try:
+        lc = os.path.expanduser("~/.warp/launch_configurations")
+        os.makedirs(lc, exist_ok=True)
+        lines = ["---", "name: shareit-resume", "windows:", "  - tabs:",
+                 "      - title: shareit resume", "        layout:"]
+        if cwd:
+            lines.append(f"          cwd: {_yaml_dq(cwd)}")
+        lines += ["          commands:", f"            - exec: {_yaml_dq(cmd)}"]
+        with open(os.path.join(lc, "shareit-resume.yaml"), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        return subprocess.run(["open", "warp://launch/shareit-resume.yaml"],
+                              capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _resume_in_iterm(cmd):
+    """Run cmd in a new iTerm2 window (Automation permission prompts once)."""
+    esc = cmd.replace("\\", "\\\\").replace('"', '\\"')
+    script = ('tell application "iTerm"\nactivate\n'
+              'set w to (create window with default profile)\n'
+              f'tell current session of w to write text "{esc}"\n'
+              'end tell')
+    try:
+        return subprocess.run(["osascript", "-e", script], capture_output=True,
+                              timeout=15).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _text_head(path, limit=120):
     """First line-ish of a text file for hover previews; None for binaries."""
     try:
@@ -1050,8 +1089,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
             if not cmd and not deep:
                 return self._json({"error": "this session can't be resumed"}, 400)
-            # Cowork → Claude app; codex → try the observed codex:// route; else terminal
-            if deep and body.get("app", True) and (
+            term_req = body.get("terminal")
+            if term_req is not None:
+                if term_req not in {t["name"] for t in _installed_terminals()}:
+                    return self._json({"error": "unknown terminal"}, 400)
+                if not cmd:
+                    term_req = None   # app-only session — nothing to run there
+            # Cowork → Claude app; codex → codex:// — unless a terminal was chosen
+            if not term_req and deep and body.get("app", True) and (
                     session.get("app") == "cowork" or session["source"] == "codex"):
                 try:
                     if subprocess.run(["open", deep], capture_output=True,
@@ -1061,8 +1106,22 @@ class Handler(BaseHTTPRequestHandler):
                                            "app": True, "target": target})
                 except (OSError, subprocess.SubprocessError):
                     pass
-            launched, term = _open_in_terminal(cmd, session.get("cwd") or None)
-            return self._json({"command": cmd, "launched": launched, "terminal": term})
+            if not cmd:
+                return self._json({"error": "this session can't be resumed"}, 400)
+            cwd = session.get("cwd") or None
+            target = term_req or "Terminal"
+            if target == "Warp":
+                launched = _resume_in_warp(cmd, cwd)
+            elif target == "iTerm":
+                launched = _resume_in_iterm(cmd)
+            elif target == "Terminal":
+                launched, _ = _open_in_terminal(cmd, cwd)
+            else:   # no scripting route for this terminal — open a window
+                    # there; the client copies the command for pasting
+                if cwd and os.path.isdir(cwd):
+                    _open_dir_in_app(cwd, target)
+                launched = False
+            return self._json({"command": cmd, "launched": launched, "terminal": target})
         if route == "/api/share/delete":
             url = body.get("url", "")
             entry = next((s for s in share.load_shares()
