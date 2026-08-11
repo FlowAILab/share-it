@@ -17,7 +17,14 @@
   <img alt="Cursor" src="https://img.shields.io/badge/Cursor-000000?logo=cursor&logoColor=white">
 </p>
 
-<p align="center"><sub>▶ demo video coming soon</sub></p>
+<p align="center">
+  <img src="docs/screenshots/palette.png" width="680" alt="Share-It palette — every AI coding session on your Mac, one search away">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/session-card.png" width="49%" alt="A session expanded — chat digest, the files the agent built, one-keystroke actions">
+  <img src="docs/screenshots/file-menu.png" width="49%" alt="Files are first-class — open, Quick Look, reveal in Finder, copy path, right from the palette">
+</p>
 
 ---
 
