@@ -288,6 +288,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 ql.dataSource = self
                 ql.delegate = self
                 ql.makeKeyAndOrderFront(nil)
+                // the palette floats (.floating); the preview must float ABOVE it
+                // or it opens hidden behind the launcher
+                ql.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
                 ql.reloadData()
                 NotificationCenter.default.addObserver(
                     forName: NSWindow.willCloseNotification, object: ql, queue: .main) { [weak self] _ in

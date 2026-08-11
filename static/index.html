@@ -189,7 +189,12 @@ body.browser #panel {
   display: inline-flex; align-items: center; gap: 3px;
   font-size: 11.5px; border-radius: 7px;
   border: 1px solid var(--hair); color: var(--dim); overflow: hidden;
+  transition: border-color 0.12s ease, background 0.12s ease,
+              transform 0.12s ease, box-shadow 0.12s ease;
 }
+.art:hover { border-color: rgba(255,255,255,0.24); background: rgba(255,255,255,0.06);
+  transform: translateY(-1px); box-shadow: 0 3px 12px rgba(0,0,0,0.35); }
+@media (prefers-reduced-motion: reduce) { .art { transition: none; } .art:hover { transform: none; } }
 .art .artbody { background: none; border: none; color: inherit; cursor: pointer;
   font: inherit; display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px 3px 4px; }
 .art .artbody:hover { color: var(--ink); }
@@ -300,7 +305,19 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--dim); }
   background: rgba(20,19,25,0.98); backdrop-filter: blur(30px) saturate(1.3);
   -webkit-backdrop-filter: blur(30px) saturate(1.3);
   border: 1px solid var(--hair); border-radius: 15px; box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+  animation: menupop 0.13s cubic-bezier(0.2, 0.9, 0.3, 1.2); transform-origin: top left;
 }
+@keyframes menupop { from { opacity: 0; transform: scale(0.96) translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { #menu, .menu-pop { animation: none; } }
+.fhdr { display: flex; align-items: center; gap: 10px; padding: 8px 11px 9px; }
+.fhdr .fico { display: inline-flex; width: 30px; height: 30px; align-items: center;
+  justify-content: center; border-radius: 8px; background: rgba(255,255,255,0.07);
+  border: 1px solid var(--hair); flex: none; }
+.fhdr .fico svg { width: 16px; height: 16px; }
+.fh-tx { min-width: 0; }
+.fh-name { font-size: 12.5px; font-weight: 600; color: var(--ink);
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fh-meta { font-size: 10.5px; color: var(--dim); margin-top: 1px; }
 #menu .mi, .menu-pop .mi { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 11px;
   border-radius: 9px; font-size: 12.5px; color: var(--ink); cursor: pointer; }
 #menu .mi kbd, .menu-pop .mi kbd { margin-left: auto; color: var(--dim); font-size: 11px; }
@@ -556,10 +573,10 @@ function menuItemsFor(s) {
   const base = (q) => q.split("/").pop();
   const payload = nSelM === 1 ? base(selPaths[0]) : `${nSelM} files`;
   const items = [
-    {t: "Copy context", k: "⏎", run: () => copyContext(s)},
-    {t: "Share link", k: "⌘L", run: () => doShare(s)},
-    {t: nf ? "Send result — files attach" : "Send result", k: "⌘R", run: () => sendResult(s)},
-    {t: "Send result — as message", k: "⌥⌘R", run: () => sendResult(s, true)},
+    {t: "Copy context", k: "⏎", ic: mic(I_STACK), run: () => copyContext(s)},
+    {t: "Share link", k: "⌘L", ic: mic(I_LINK), run: () => doShare(s)},
+    {t: nf ? "Send result — files attach" : "Send result", k: "⌘R", ic: mic(I_ATTACH), run: () => sendResult(s)},
+    {t: "Send result — as message", k: "⌥⌘R", ic: mic(I_BUBBLE), run: () => sendResult(s, true)},
   ];
   if (nf && nSelM)
     items.push({t: `Copy files (${payload})`, k: "⇧⌘C", run: () => copyFilesOnly(s, selPaths)});
@@ -576,11 +593,47 @@ function menuItemsFor(s) {
   }});
   items.push({sep: 1});
   const ot = openTargetFor(s);
-  if (ot) items.push({t: `Open in ${ot}`, k: "⌥⏎", run: () => doResume(s)});
-  items.push({t: "Reveal in Finder", run: () =>
+  if (ot) items.push({t: `Open in ${ot}`, k: "⌥⏎", ic: mic(I_TERM), run: () => doResume(s)});
+  items.push({t: "Reveal in Finder", ic: mic(I_FOLDER), run: () =>
     api("/api/file/reveal", {path: s.path, files: [fp[0] || s.path]})
       .then(() => toast("Revealed in Finder")).catch((e) => toast(e.message))});
+  items.push({t: "Copy session ID", ic: mic(I_ID), run: async () => {
+    if (await copyText(sessionIdOf(s))) toast("Session ID copied");
+  }});
   return items;
+}
+
+function sessionIdOf(s) {
+  // what `--resume` takes: codex thread id when present, else the file's UUID
+  return s.thread || s.path.split("/").pop().replace(/\.[^.]+$/, "");
+}
+
+/* first-class file menu (Spotlight parity: Open / Quick Look / Show in
+   Finder / Get Info, plus the copies a path deserves) */
+function fileMenuItems(s, fp) {
+  const base = fp.split("/").pop();
+  const p = peekCache[s.path];
+  const meta = [...(p?.artifacts || []), ...(p?.reads || [])].find((a) => a.path === fp);
+  const kindWord = {created: "created", modified: "modified"}[meta?.kind] || "referenced";
+  const fileApi = (route, okMsg, failMsg) => api(route, {path: s.path, files: [fp]})
+    .then((d) => toast(d.ok ? okMsg : failMsg)).catch((e) => toast(e.message));
+  return [
+    {fhdr: {ico: FILE_ICON(base), name: base,
+            meta: `${kindWord}${meta?.size != null ? ` · ${fmtSize(meta.size)}` : ""}`}},
+    {t: "Open", k: "⏎", ic: mic(I_OPEN), run: () =>
+      fileApi("/api/file/open", `Opened ${base}`, "Couldn't open")},
+    {t: "Quick Look", k: "␣", ic: mic(I_EYE), run: () => {
+      if (nativeCmd("quickLook", [fp])) qlOpen = true;
+      else api("/api/file/preview", {path: s.path, files: [fp]}).catch((e) => toast(e.message));
+    }},
+    {t: "Show in Finder", ic: mic(I_FOLDER), run: () =>
+      fileApi("/api/file/reveal", "Revealed in Finder", "Couldn't reveal")},
+    {t: "Get Info", ic: mic(I_INFO), run: () =>
+      fileApi("/api/file/info", "", "Get Info needs Automation access for Finder")},
+    {sep: 1},
+    {t: "Copy file", ic: mic(I_STACK), run: () => copyFilesOnly(s, [fp])},
+    {t: "Copy path", ic: mic(I_PATH), run: async () => { if (await copyText(fp)) toast("Path copied"); }},
+  ];
 }
 
 async function copyFilesOnly(s, fp) {
@@ -598,8 +651,19 @@ async function copyFilesOnly(s, fp) {
 
 
 
+const I_OPEN = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3H3.4A1.4 1.4 0 0 0 2 4.4v6.2A1.4 1.4 0 0 0 3.4 12h6.2A1.4 1.4 0 0 0 11 10.6V8"/><path d="M8.5 2H12v3.5M12 2 6.8 7.2"/></svg>';
+const I_EYE = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M1.3 7S3.4 3.4 7 3.4 12.7 7 12.7 7 10.6 10.6 7 10.6 1.3 7 1.3 7z"/><circle cx="7" cy="7" r="1.7"/></svg>';
+const I_INFO = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="7" cy="7" r="5.6"/><path d="M7 6.4v3.2M7 4.3v0.1"/></svg>';
+const I_PATH = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M8.6 2.6 5.4 11.4"/><path d="M3.4 5 1.6 7l1.8 2M10.6 5l1.8 2-1.8 2"/></svg>';
+const I_ID = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1.6" y="3" width="10.8" height="8" rx="1.6"/><circle cx="4.9" cy="6.4" r="1.15"/><path d="M3.4 9.3c0.3-1 1-1.4 1.5-1.4s1.2 0.4 1.5 1.4M8.4 5.8h3M8.4 8.2h2.1"/></svg>';
+const I_ATTACH = '<svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.6 6.4 7.2 10.8a2.9 2.9 0 0 1-4.1-4.1L7.9 1.9a1.93 1.93 0 0 1 2.7 2.7L6.2 9a0.97 0.97 0 0 1-1.4-1.4l4-4"/></svg>';
+const mic = (svg) => `<span class="mic">${svg}</span>`;
+
 function menuHTML(items, selIdx) {
   return items.map((i, idx) => i.sep ? '<hr role="separator">'
+    : i.fhdr ? `<div class="fhdr"><span class="fico">${i.fhdr.ico}</span>`
+      + `<div class="fh-tx"><div class="fh-name">${esc(i.fhdr.name)}</div>`
+      + `<div class="fh-meta">${esc(i.fhdr.meta)}</div></div></div><hr role="separator">`
     : i.hdr ? `<div class="mhdr">${esc(i.hdr)}</div>`
     : `<div class="mi${idx === selIdx ? " sel" : ""}${i.sub ? " has-sub" : ""}" role="menuitem" tabindex="0"`
       + ` aria-haspopup="${i.sub ? "menu" : "false"}" data-mi="${idx}">`
@@ -616,13 +680,13 @@ function placeMenu(el, x, y, anchorRight) {
   el.style.top = top + "px";
 }
 
-function openMenu(s, x, y, anchorRight) {
+function openMenu(s, x, y, anchorRight, itemsOverride) {
   const opener = document.activeElement;
   closeMenu();
   _menuOpener = opener;
-  const items = menuItemsFor(s);
+  const items = itemsOverride || menuItemsFor(s);
   if (!items.length) return;
-  menu = {items, sel: items.findIndex((i) => !i.sep && !i.hdr), s, sub: null};
+  menu = {items, sel: items.findIndex((i) => !i.sep && !i.hdr && !i.fhdr), s, sub: null};
   const el = document.createElement("div");
   el.id = "menu"; el.setAttribute("role", "menu"); el.tabIndex = -1;
   el.innerHTML = menuHTML(items, menu.sel);
@@ -1131,17 +1195,26 @@ $("#list").addEventListener("contextmenu", (ev) => {
     }
     return;
   }
-  // chip right-click: select + Quick Look
+  // chip right-click: first-class file context menu (Spotlight-style)
   ev.preventDefault();
   const s = sessionAt(ev);
   if (!s) return;
-  s._sel = s._sel || new Set();
-  if (!s._sel.has(artChip.dataset.art)) { s._selTouched = true; s._share = null; }
-  s._sel.add(artChip.dataset.art);
-  render();
-  if (nativeCmd("quickLook", [artChip.dataset.art])) qlOpen = true;
-  else api("/api/file/preview", {path: s.path, files: [artChip.dataset.art]})
-      .catch((e) => toast(e.message));
+  hideTip();   // the chip's hover tip must not linger behind the menu
+  if (menu) { closeMenu(); return; }
+  openMenu(s, ev.clientX, ev.clientY, false, fileMenuItems(s, artChip.dataset.art));
+});
+$("#list").addEventListener("dblclick", (ev) => {
+  const art = ev.target.closest("[data-art]");
+  if (!art) return;
+  const s = sessionAt(ev);
+  if (!s) return;
+  // double-click = Finder semantics: OPEN in the default app (the single-click
+  // already Quick Looked it — close that first)
+  nativeCmd("closeQuickLook", []);
+  qlOpen = false;
+  api("/api/file/open", {path: s.path, files: [art.dataset.art]})
+    .then((d) => toast(d.ok ? `Opened ${art.dataset.art.split("/").pop()}` : "Couldn't open"))
+    .catch((e) => toast(e.message));
 });
 $("#list").addEventListener("mouseover", (ev) => {
   if (Date.now() - _navTs < 400) return;   // don't fight the arrow keys
@@ -1196,7 +1269,7 @@ function cardHtml(s) {
     const on = s._sel.has(a.path);
     const mark = st === "busy" ? "…" : lastCopied === a.path ? "✓" : "";
     const kindWord = {"a-new": "created", "a-mod": "modified", "a-ref": "read (referenced)"}[cls];
-    const tip = `${kindWord}${a.size != null ? ` · ${fmtSize(a.size)}` : ""} — click to preview`;
+    const tip = `${kindWord}${a.size != null ? ` · ${fmtSize(a.size)}` : ""} — click previews · 2× opens · right-click for more`;
     // checkbox + preview are SEPARATE focusable buttons (keyboard-usable)
     return `<span class="art ${cls}${on ? " picked" : ""}">
       <button class="chk${on ? " on" : ""}" data-chk="${esc(a.path)}" role="checkbox" aria-checked="${on}" tabindex="0" aria-label="${on ? "Deselect" : "Select"} ${esc(a.name)}" data-tip="${on ? "Remove from selection" : "Select for copy/share"}">${on ? "✓" : ""}</button>
@@ -1550,7 +1623,7 @@ document.addEventListener("keydown", (e) => {
       sub.querySelectorAll(".mi").forEach((el) => el.classList.toggle("sel", +el.dataset.mi === menu.sub.sel));
       return;
     }
-    const sels = menu.items.map((it, i) => (it.hdr || it.sep) ? null : i).filter((i) => i !== null);
+    const sels = menu.items.map((it, i) => (it.hdr || it.sep || it.fhdr) ? null : i).filter((i) => i !== null);
     if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();

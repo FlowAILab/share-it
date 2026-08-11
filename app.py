@@ -992,7 +992,8 @@ class Handler(BaseHTTPRequestHandler):
             md = render.redact(answer)
             return self._json({"answer": md, "html": html, "files": files,
                                "skipped": [os.path.basename(s) for s in skipped]})
-        if route in ("/api/file/copy", "/api/file/reveal", "/api/file/open", "/api/file/preview"):
+        if route in ("/api/file/copy", "/api/file/reveal", "/api/file/open",
+                     "/api/file/preview", "/api/file/info"):
             path, files = body.get("path", ""), body.get("files") or []
             if not _allowed(path) or not files:
                 return self._json({"error": "invalid request"}, 400)
@@ -1011,6 +1012,15 @@ class Handler(BaseHTTPRequestHandler):
                     ok = True
                 elif route == "/api/file/reveal":
                     ok = subprocess.run(["open", "-R", files[0]], capture_output=True,
+                                        timeout=10).returncode == 0
+                elif route == "/api/file/info":
+                    # Finder's Get Info window — Spotlight parity (⌘I). Needs the
+                    # one-time Automation-for-Finder permission; ok:false if denied.
+                    esc = files[0].replace("\\", "\\\\").replace('"', '\\"')
+                    script = ('tell application "Finder"\n'
+                              f'open information window of (POSIX file "{esc}" as alias)\n'
+                              'activate\nend tell')
+                    ok = subprocess.run(["osascript", "-e", script], capture_output=True,
                                         timeout=10).returncode == 0
                 else:
                     items = ", ".join(
