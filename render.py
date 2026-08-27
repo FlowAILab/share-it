@@ -311,6 +311,41 @@ def _esc(text):
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
+# Box-drawing, block and braille. Pinning the glyphs to a monospace face is
+# not enough: the LABELS between them stay proportional, so the columns still
+# do not line up. A run of these lines has to become a fixed-width block.
+_BOXDRAW = re.compile(r"[\u2500-\u259F\u2800-\u28FF]")
+
+
+def _lift_term(lines, out, esc):
+    """Flush a buffered run of terminal-shaped lines as one monospace block.
+
+    One stray │ in a sentence is prose; two or more lines carrying them is a
+    tree, a table or a chart, and only lines up in a fixed-width column."""
+    if not lines:
+        return
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if len(lines) >= 2:
+        out.append('<pre class="term">' + "\n".join(esc(l) for l in lines) + "</pre>")
+    else:
+        out.extend(esc(l) for l in lines)
+    lines.clear()
+
+
+def _text_html(text):
+    """Escape plain message text, lifting terminal-shaped runs to monospace."""
+    out, run = [], []
+    for line in (text or "").split("\n"):
+        if _BOXDRAW.search(line) or (run and not line.strip()):
+            run.append(line)
+            continue
+        _lift_term(run, out, _esc)
+        out.append(_esc(line))
+    _lift_term(run, out, _esc)
+    return "\n".join(out)
+
+
 _MD_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 _MD_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
 _MD_CODE = re.compile(r"`([^`\n]+)`")
@@ -319,15 +354,20 @@ _MD_CODE = re.compile(r"`([^`\n]+)`")
 def _md_to_html(text):
     """Tiny, safe markdown: input is escaped first, so no embedded HTML survives;
     links restricted to http(s). Headings/bold/code/lists/fences only."""
-    out, in_fence = [], False
+    out, in_fence, run = [], False, []
     for line in _esc(text).split("\n"):
         if line.strip().startswith("```"):
+            _lift_term(run, out, lambda x: x)     # already escaped above
             out.append("</pre>" if in_fence else "<pre>")
             in_fence = not in_fence
             continue
         if in_fence:
             out.append(line)
             continue
+        if _BOXDRAW.search(line) or (run and not line.strip()):
+            run.append(line)                      # fixed-width run, hold it
+            continue
+        _lift_term(run, out, lambda x: x)
         line = _MD_LINK.sub(r'<a href="\2" rel="noopener">\1</a>', line)
         line = _MD_BOLD.sub(r"<strong>\1</strong>", line)
         line = _MD_CODE.sub(r"<code>\1</code>", line)
@@ -342,6 +382,7 @@ def _md_to_html(text):
             out.append(f"<div class='li'>•&ensp;{stripped[2:]}</div>")
         else:
             out.append(line)
+    _lift_term(run, out, lambda x: x)
     if in_fence:
         out.append("</pre>")
     return "\n".join(out)
@@ -386,11 +427,22 @@ _LOGOS = {
 }
 
 _HTML_CSS = """
+/* Agent output is full of box-drawing, block and braille characters - trees,
+   tables, progress bars, spinners. The UI font has none of them, so the
+   browser substitutes a different face per character and the result is
+   shattered: mismatched widths, broken baselines, rules that do not join.
+   Pin exactly those ranges to a monospace face; every other character still
+   falls through to the proportional stack. */
+@font-face { font-family:"boxdraw";
+  src:local("Menlo"),local("SF Mono"),local("Monaco"),local("Consolas"),
+      local("DejaVu Sans Mono"),local("Courier New");
+  unicode-range:U+2500-259F, U+2800-28FF; }
 :root { --ink:#1d2126; --dim:#6b7280; --hair:#e6e8ea; --soft:#f2f3f4; --acc:#0e6e63;
         --bubble:#e9edf0; }
 * { box-sizing:border-box; margin:0; }
 body { background:#fbfbfa; color:var(--ink); -webkit-font-smoothing:antialiased;
-  font:15.5px/1.6 -apple-system,"SF Pro Text",system-ui,sans-serif; padding:0 20px 90px; }
+  font:15.5px/1.6 "boxdraw",-apple-system,"SF Pro Text",system-ui,sans-serif;
+  padding:0 20px 90px; }
 header { max-width:46rem; margin:0 auto; padding:40px 0 26px;
   display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--hair); }
 header .logo { flex:none; width:34px; height:34px; border-radius:10px; background:var(--soft);
@@ -418,6 +470,11 @@ details.steps > div { border-left:2px solid var(--hair); margin:10px 0 0 10px; p
 .step pre { padding:10px 13px; background:var(--soft); border-radius:8px;
   font:0.76rem/1.55 ui-monospace,Menlo,monospace; overflow-x:auto; white-space:pre-wrap; }
 .step .think { color:var(--dim); font-style:italic; font-size:0.86rem; white-space:pre-wrap; }
+/* 1.2 not 1.45: box-drawing verticals must touch row to row or every table
+   and tree shows a dashed seam where a solid rule belongs. */
+.term { font:0.78rem/1.2 ui-monospace,Menlo,Monaco,"Courier New",monospace;
+  white-space:pre; overflow-x:auto; background:rgba(0,0,0,.045); border-radius:8px;
+  padding:9px 11px; margin:7px 0; tab-size:4; }
 .files { border:1px solid var(--hair); border-radius:14px; padding:16px 20px; margin:26px 0 26px 38px; }
 .files h2 { font-size:0.85rem; margin-bottom:8px; }
 .files li { margin:4px 0 4px 1.1em; font-size:0.86rem; }
@@ -440,6 +497,7 @@ footer { max-width:46rem; margin:48px auto 0; color:var(--dim); font-size:0.76re
   :root { --ink:#e6e9eb; --dim:#8f99a3; --hair:#2a3036; --soft:#1e2429; --acc:#3fae9c;
           --bubble:#242b31; }
   body { background:#14171a; }
+  .term { background:rgba(255,255,255,.05); }
 }
 """
 
@@ -483,7 +541,7 @@ def render_html(session, messages, redact_secrets=True, include_thinking=False,
             if not (msg.get("text") or "").strip():
                 continue
             flush_steps()
-            parts.append(f'<div class="turn you"><div class="body">{_esc(clean(_strip_image_token(msg["text"], msg) if media_base else msg["text"]))}'
+            parts.append(f'<div class="turn you"><div class="body">{_text_html(clean(_strip_image_token(msg["text"], msg) if media_base else msg["text"]))}'
                          f'{_media_html(msg, media_base)}</div></div>')
         elif role == "assistant":
             if not (msg.get("text") or "").strip():

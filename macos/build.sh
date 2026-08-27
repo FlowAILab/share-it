@@ -11,7 +11,8 @@ command -v swiftc >/dev/null || { echo "swiftc not found — install Xcode Comma
 
 echo "compiling…"
 swiftc -O main.swift -o share-it-bin \
-  -framework Cocoa -framework WebKit -framework Carbon -framework Quartz -framework Security
+  -framework Cocoa -framework WebKit -framework Carbon -framework Quartz -framework Security \
+  -framework UserNotifications
 
 echo "assembling ${DEST}…"
 rm -rf "$DEST"
@@ -21,7 +22,17 @@ mv share-it-bin "$DEST/Contents/MacOS/share-it"
 for f in $(git -C .. ls-files '*.py' 2>/dev/null | grep -v '^tests/' || echo ../*.py); do
   cp "../$f" "$DEST/Contents/Resources/backend/$(basename "$f")" 2>/dev/null || cp "$f" "$DEST/Contents/Resources/backend/"
 done
-cp ../static/index.html "$DEST/Contents/Resources/backend/static/"
+# the whole static dir, not just index.html — the page references sibling
+# assets (mood-empty.svg), and copying one file shipped a broken app
+cp -R ../static/. "$DEST/Contents/Resources/backend/static/"
+# fail loudly if a module the backend imports did not make it in
+for m in $(grep -oE '^import [a-z_]+' ../app.py | awk '{print $2}'); do
+  [ -f "../$m.py" ] || continue                      # stdlib import, skip
+  [ -f "$DEST/Contents/Resources/backend/$m.py" ] || {
+    echo "ERROR: $m.py is imported by app.py but did not ship."
+    echo "       It is probably untracked — run: git add $m.py"
+    exit 1; }
+done
 python3 make-icon.py   # always regenerate — a stale committed icns must never ship
 cp AppIcon.icns "$DEST/Contents/Resources/AppIcon.icns"
 
@@ -50,5 +61,15 @@ cat > "$DEST/Contents/Info.plist" <<'PLIST'
   <key>NSDownloadsFolderUsageDescription</key><string>Share-It copies or shares files your AI session created in Downloads.</string>
 </dict></plist>
 PLIST
-codesign --force --deep --sign - "$DEST" 2>/dev/null || true
+# A stable signing identity, not ad-hoc: macOS refuses to grant notification
+# permission to an ad-hoc signature because there is no identity to attach the
+# grant to. SHAREIT_SIGN_ID overrides; falls back to ad-hoc if it is missing.
+SIGN_ID="${SHAREIT_SIGN_ID:-share-it dev}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+  codesign --force --deep --sign "$SIGN_ID" "$DEST" && echo "signed as: $SIGN_ID"
+else
+  echo "warning: signing identity '$SIGN_ID' not found — falling back to ad-hoc;"
+  echo "         macOS will not deliver notifications from an ad-hoc signed app."
+  codesign --force --deep --sign - "$DEST" 2>/dev/null || true
+fi
 echo "done → $DEST   (⌥S toggles the panel)"

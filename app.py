@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -19,6 +20,8 @@ import bundle
 import parsers
 import render
 import search
+import review
+import sentiment
 import share
 
 PORT = int(os.environ.get("SHAREIT_PORT") or 8749)
@@ -187,6 +190,18 @@ def _allowed(path):
         return True
     except ValueError:
         return False
+
+
+def _sessions_for_sentiment() -> list[dict]:
+    """The same index the list view uses, trimmed to what sentiment needs."""
+    try:
+        with _lock:
+            rows = parsers.scan_sessions(_cache)
+    except Exception:
+        return []
+    return [{"path": r.get("path"), "app": r.get("app"), "source": r.get("source"),
+             "title": r.get("title"), "project": r.get("project"),
+             "mtime": r.get("mtime")} for r in rows if r.get("path")]
 
 
 def _session_entry(path):
@@ -377,7 +392,7 @@ def _artifact_fingerprint(session, opts):
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
 
 
-ANNOT_VERSION = 6  # +n_primary (payload-honest badge)
+ANNOT_VERSION = 7  # +n_primary (payload-honest badge)
 
 
 def _known_files(session):
@@ -669,11 +684,43 @@ class Handler(BaseHTTPRequestHandler):
     def _route_get(self):
         parsed = urlparse(self.path)
         route = parsed.path
-        open_route = route in ("/", "/api/health")
+        # static art carries no user data and is loaded by <img>, which cannot
+        # attach the token header; the route itself is restricted to images
+        open_route = route in ("/", "/api/health") or route.startswith("/static/")
         if not self._guard(need_token=not open_route):
             return
         if route == "/api/health":
             self._json({"app": "share-it", "version": VERSION})
+        elif route == "/api/sentiment":
+            self._json(sentiment.summary(_sessions_for_sentiment()))
+        elif route == "/api/review/status":
+            self._json(review.status())
+        elif route == "/api/review/transcript":
+            self._json({"messages": review.transcript(
+                parse_qs(urlparse(self.path).query).get("path", [""])[0])})
+        elif route == "/api/review/notes":
+            self._json({"text": review.notes(
+                parse_qs(urlparse(self.path).query).get("path", [""])[0])})
+        elif route.startswith("/static/"):
+            # images only, no traversal: the name is matched, then the resolved
+            # path is required to stay inside STATIC_DIR
+            name = route[len("/static/"):]
+            if not re.fullmatch(r"[A-Za-z0-9._-]+\.(svg|png|webp)", name or ""):
+                return self._json({"error": "not found"}, 404)
+            full = os.path.realpath(os.path.join(STATIC_DIR, name))
+            if not full.startswith(os.path.realpath(STATIC_DIR) + os.sep) \
+                    or not os.path.isfile(full):
+                return self._json({"error": "not found"}, 404)
+            kind = {"svg": "image/svg+xml", "png": "image/png",
+                    "webp": "image/webp"}[name.rsplit(".", 1)[1]]
+            with open(full, "rb") as fh:
+                blob = fh.read()
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(blob)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(blob)
         elif route == "/":
             with open(os.path.join(STATIC_DIR, "index.html"), "rb") as fh:
                 data = fh.read()   # never carries the token; the page reads it
@@ -1080,6 +1127,61 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "unknown app"}, 400)
                 ok = _open_dir_in_app(cwd, target)
             return self._json({"ok": ok, "cwd": cwd})
+        if route == "/api/review/enable":
+            path = body.get("path", "")
+            if not _allowed(path):
+                return self._json({"error": "invalid path"}, 400)
+            try:
+                session = _session_entry(path)
+            except (KeyError, ValueError) as e:
+                return self._json({"error": str(e)}, 400)
+            # the session's cwd is where the agent launched; the repo actually
+            # under work can be a subdirectory, so allow an explicit override
+            repo = body.get("cwd") or session.get("cwd") or ""
+            if body.get("cwd"):
+                real = os.path.realpath(os.path.expanduser(repo))
+                home = os.path.realpath(os.path.expanduser("~"))
+                if not (os.path.isdir(real) and (real == home or real.startswith(home + os.sep))):
+                    return self._json({"error": "cwd must be a directory in your home"}, 400)
+                repo = real
+            out = review.enable(path, session["source"],
+                                title=session.get("title", ""), cwd=repo)
+            return self._json(out, 400 if out.get("error") else 200)
+        if route == "/api/review/focus":
+            return self._json(review.set_focus(body.get("path", ""), body.get("text", "")))
+        if route == "/api/review/send":
+            return self._json(review.send_to_peer(body.get("path", ""), int(body.get("i") or 0)))
+        if route == "/api/review/reject":
+            return self._json(review.reject(body.get("path", ""), int(body.get("i") or 0)))
+        if route == "/api/sentiment/refresh":
+            n = max(1, min(6, int(body.get("batches") or 2)))
+            threading.Thread(target=sentiment.refresh,
+                             args=(_sessions_for_sentiment(), n), daemon=True).start()
+            return self._json({"ok": True, "message": f"Reading up to {n * 10} sessions…"})
+        if route == "/api/review/copy":
+            return self._json(review.copy_review(body.get("path", ""), int(body.get("i") or 0)))
+        if route == "/api/review/now":
+            return self._json(review.review_now(body.get("path", ""),
+                                                body.get("ask", "")))
+        if route == "/api/review/open":
+            w = review._w(body.get("path", "")) or {}
+            link, cmd = review.reviewer_app_link(w), review.reviewer_resume_command(w)
+            if link and subprocess.run(["open", link], capture_output=True,
+                                       timeout=10).returncode == 0:
+                return self._json({"ok": True, "launched": True, "command": cmd})
+            if not cmd:
+                return self._json({"error": "the reviewer has no session yet"}, 400)
+            launched = _resume_in_warp(cmd, w.get("cwd") or None)   # else a terminal
+            if not launched:
+                launched, _ = _open_in_terminal(cmd, w.get("cwd") or None)
+            return self._json({"ok": True, "launched": launched, "command": cmd})
+        if route == "/api/review/disable":
+            return self._json(review.disable(body.get("path", "")))
+        if route == "/api/review/resolve":
+            act = body.get("action", "dismiss")
+            if act not in ("send", "dismiss"):
+                return self._json({"error": "bad action"}, 400)
+            return self._json(review.resolve(body.get("path", ""), act))
         if route == "/api/open_url":
             u = body.get("url", "")
             if not (isinstance(u, str) and u.startswith("https://")):
@@ -1293,8 +1395,22 @@ def _peek_prewarm(n=40):
             continue
 
 
-def _artifact_counter():
-    """Background: annotate cached sessions with their artifact count (cheap UI hint)."""
+# path -> (last_attempt, consecutive_failures). A transcript that will not
+# parse must not be retried on every pass forever.
+_annot_backoff: dict[str, tuple[float, int]] = {}
+ANNOT_BUDGET_S = 45.0      # work slice per pass; the caller sleeps afterwards
+
+
+def _artifact_counter(budget_s: float = ANNOT_BUDGET_S):
+    """Background: annotate cached sessions with their artifact count (cheap UI hint).
+
+    BOUNDED ON PURPOSE. A session you are working in right now changes mtime
+    every few seconds, so it is always back in `todo` — an unbounded loop here
+    never returns, the caller's 120s sleep is never reached, and the process
+    pegs a core re-parsing multi-megabyte transcripts forever. Do a slice and
+    hand control back.
+    """
+    deadline = time.time() + budget_s
     while True:
         with _lock:
             _merge_annotations()
@@ -1305,22 +1421,38 @@ def _artifact_counter():
                          or (_annot.get(e["path"]) or {}).get("mtime") != e["mtime"])]
             prio = list(_annot_priority)
             _annot_priority.clear()
+        now = time.time()
+        # a transcript that keeps failing gets exponentially rarer retries
+        todo = [e for e in todo if e["path"] in prio or (
+            lambda b: not b or now - b[0] >= min(3600, 30 * 2 ** b[1])
+        )(_annot_backoff.get(e["path"]))]
         if not todo and not prio:
             _peek_prewarm()
             return
         todo.sort(key=lambda e: (e["path"] not in prio, -e["mtime"]))
         for i, ent in enumerate(todo):
-            _annotate_one(ent["path"], ent["source"], ent.get("cwd"), ent["mtime"])
+            ok = _annotate_one(ent["path"], ent["source"], ent.get("cwd"), ent["mtime"])
+            fails = (_annot_backoff.get(ent["path"]) or (0, 0))[1]
+            _annot_backoff[ent["path"]] = (time.time(), 0 if ok else min(fails + 1, 8))
             if i % 25 == 24:
                 with _lock:
                     _save_annot()
                     _save_cache()
+            if time.time() > deadline:      # slice spent — let the caller sleep
+                with _lock:
+                    _save_annot()
+                    _save_cache()
+                return
         with _lock:
             live_paths = set(_cache.keys())
             for dead in [p for p in _annot if p not in live_paths]:
                 del _annot[dead]  # session gone → drop its annotation
+            for dead in [p for p in _annot_backoff if p not in live_paths]:
+                del _annot_backoff[dead]
             _save_annot()
             _save_cache()
+        if time.time() > deadline:
+            return
 
 
 RESCUE_AGE_DAYS = 20   # copy Claude transcripts before the ~30-day purge
@@ -1442,6 +1574,17 @@ def main():
         print(f"share-it: port {PORT} is already in use — is another instance running?")
         raise SystemExit(1)
     _signal_ready()  # bind succeeded → tell the shell it's really us
+    # If the Swift shell dies, this backend must go with it. An orphan keeps
+    # port 8749 bound, and the next launch fails with "backend didn't start".
+    def _exit_with_parent(ppid: int = os.getppid()) -> None:
+        while True:
+            time.sleep(2)
+            if os.getppid() != ppid:       # reparented to launchd: parent is gone
+                os._exit(0)
+    if os.getppid() > 1:
+        threading.Thread(target=_exit_with_parent, daemon=True).start()
+
+    review.start()   # cross-model reviewer: resumes whatever it was watching
     url = f"http://127.0.0.1:{PORT}"
     print(f"share-it running at {url}")
     if "--no-browser" not in sys.argv:

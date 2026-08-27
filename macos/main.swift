@@ -2,6 +2,7 @@
 // wrapping the local Python backend's web UI.
 import AppKit
 import WebKit
+import UserNotifications
 import Carbon.HIToolbox
 import Quartz
 import Security
@@ -11,7 +12,13 @@ final class KeyPanel: NSPanel {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
-                         NSWindowDelegate, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+                         NSWindowDelegate, QLPreviewPanelDataSource, QLPreviewPanelDelegate,
+                         UNUserNotificationCenterDelegate {
+    // Reviewer banners are posted by the app itself. Routing them through a
+    // helper meant they carried someone else's identity — macOS silently drops
+    // a notification whose sender is not registered, so they never appeared.
+    var reviewSeen = Set<String>()
+    var reviewTimer: Timer?
     var qlFiles: [URL] = []
     var panel: KeyPanel!
     var webView: WKWebView!
@@ -26,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         buildPanel()
         registerHotKey()
         waitForServer(attempts: 60)
+        startReviewNotifications()
     }
 
     func buildMenu() {
@@ -182,6 +190,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         webView.autoresizingMask = [.width, .height]
         effect.addSubview(webView)
         panel.contentView = effect
+    }
+
+    // MARK: - reviewer notifications
+
+    func startReviewNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { granted, err in
+            if let err = err { NSLog("share-it: notification auth failed: \(err)") }
+            else { NSLog("share-it: notifications granted=\(granted)") }
+        }
+        reviewTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.pollReviews()
+        }
+    }
+
+    func pollReviews() {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/api/review/status") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 4)
+        req.setValue(token, forHTTPHeaderField: "X-Shareit-Token")
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            guard let self = self, let data = data,
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let watches = root["watches"] as? [[String: Any]] else { return }
+            for w in watches {
+                guard let pending = w["pending"] as? [String: Any],
+                      let at = pending["at"] as? String,
+                      pending["sent_at"] == nil else { continue }
+                let key = ((w["path"] as? String) ?? "") + "|" + at
+                if self.reviewSeen.contains(key) { continue }
+                self.reviewSeen.insert(key)
+                let reviewer = (w["reviewer_label"] as? String) ?? "Reviewer"
+                let peer = (w["peer_label"] as? String) ?? "the agent"
+                let title = (w["title"] as? String) ?? "a session"
+                let head = (pending["headline"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                    ?? ((pending["summary"] as? [String])?.first ?? "has something for you")
+                let sev = (pending["severity"] as? Int) ?? 0
+                let mark = sev >= 3 ? "Fix before the next step" : "Worth telling \(peer)"
+                let path = (w["path"] as? String) ?? ""
+                DispatchQueue.main.async {
+                    self.postReviewNotification(title: "\(title) — \(reviewer) reviewing \(peer)",
+                                                subtitle: mark, body: head, path: path)
+                }
+            }
+        }.resume()
+    }
+
+    func postReviewNotification(title: String, subtitle: String, body: String, path: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.subtitle = subtitle
+        content.body = body
+        content.sound = .default
+        content.userInfo = ["path": path]
+        let req = UNNotificationRequest(identifier: UUID().uuidString,
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req) { err in
+            if let err = err { NSLog("share-it: notification post failed: \(err)") }
+        }
+    }
+
+    // banners must show even when share-it is the frontmost app
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler handler:
+                                    @escaping (UNNotificationPresentationOptions) -> Void) {
+        handler([.banner, .sound])
+    }
+
+    // clicking the banner opens the panel, on the reviews tab
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler handler: @escaping () -> Void) {
+        let path = (response.notification.request.content.userInfo["path"] as? String) ?? ""
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            self.showPanel()
+            // open the reviews tab with that reviewer's card already expanded
+            let esc = path.replacingOccurrences(of: "\\", with: "\\\\")
+                          .replacingOccurrences(of: "\"", with: "\\\"")
+            self.webView.evaluateJavaScript("""
+              if (typeof mode !== 'undefined') {
+                mode = 'reviews';
+                if ("\(esc)" && typeof _openW !== 'undefined') _openW = "\(esc)";
+                render();
+                if (typeof loadTx === 'function') loadTx();
+              }
+              """, completionHandler: nil)
+        }
+        handler()
     }
 
     func showPanel() {

@@ -396,6 +396,29 @@ def _codex_generated_images(path):
         os.path.join(_CODEX_HOME, "generated_images", m.group(1))), "*"))
 
 
+# The Artifact tool's receipt line: "Published <path> at <url>". Stable, and
+# the only record that carries the published URL.
+_ARTIFACT_PUBLISHED = re.compile(
+    r"^Published\s+(/.+?)\s+at\s+(https://\S+)", re.M)
+
+
+def _publishable(rp: str, transcript: str) -> bool:
+    """Whether a formally declared artifact may be offered.
+
+    Two homes are legitimate. The user's own visible files, and this session's
+    scratchpad - agents are told to write working files there, so most reports
+    are published from it. The scratchpad lives outside $HOME, so a plain home
+    check silently drops every artifact written the way we ask for them. It is
+    still not a licence to read /tmp at large: the path must carry this very
+    session's id, which nothing else on disk does."""
+    home = os.path.realpath(os.path.expanduser("~")) + os.sep
+    if (rp.startswith(home) and "/Library/" not in rp
+            and ".app/" not in rp and "/." not in rp[len(home) - 1:]):
+        return True
+    sid = os.path.basename(transcript).rsplit(".", 1)[0]
+    return bool(sid) and f"{os.sep}{sid}{os.sep}" in rp and f"{os.sep}scratchpad{os.sep}" in rp
+
+
 def session_artifacts(path, limit=50, source=None, cwd=None):
     """Files the agent successfully wrote during this session that still exist.
 
@@ -421,17 +444,18 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
         candidates = []
         if is_claude and m["name"] == "Artifact" and m.get("ok"):
             # OFFICIALLY DECLARED artifact — the session published this file.
-            # Highest rank, containment-exempt (scratchpads live outside cwd).
-            try:
-                fp = json.loads(m["input"]).get("file_path")
-            except (json.JSONDecodeError, AttributeError):
-                fp = None
-            if fp:
+            # The tool's own receipt is the authority: it names the path AND
+            # the live URL, so we neither guess nor depend on the local file.
+            hit = _ARTIFACT_PUBLISHED.search(m.get("output") or "")
+            fp, url = (hit.group(1), hit.group(2)) if hit else (None, "")
+            if not fp:
+                try:                      # no receipt (older log) — fall back
+                    fp = json.loads(m["input"]).get("file_path")
+                except (json.JSONDecodeError, AttributeError):
+                    fp = None
+            if fp and _publishable(os.path.realpath(fp), real):
                 rp = os.path.realpath(fp)
-                home = os.path.realpath(os.path.expanduser("~")) + os.sep
-                if (rp.startswith(home) and "/Library/" not in rp
-                        and ".app/" not in rp and "/." not in rp[len(home) - 1:]):
-                    declared[rp] = True   # published, but still the user's own visible files
+                declared[rp] = url or declared.get(rp) or ""
             continue
         if is_claude and m["name"] in _WRITE_TOOLS:
             if not m.get("ok"):  # denied or failed writes are not artifacts
@@ -477,13 +501,19 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
     if not root and not gen_images and not declared:
         return []  # unknown project root → no safe containment → no auto-artifacts
     out = []
-    for d in declared:  # formally published — always first, wherever they live
+    for d, url in declared.items():  # formally published — always first
         try:
             st = os.stat(d)
         except OSError:
+            # the file may be gone, but a published artifact still has a URL
+            if url:
+                out.append({"path": d, "name": os.path.basename(d), "size": 0,
+                            "kind": "created", "declared": True, "pub_url": url,
+                            "missing": True, "mtime": 0})
             continue
         out.append({"path": d, "name": os.path.basename(d), "size": st.st_size,
-                    "kind": "created", "declared": True, "mtime": st.st_mtime})
+                    "kind": "created", "declared": True, "mtime": st.st_mtime,
+                    **({"pub_url": url} if url else {})})
     for g in gen_images:  # our own store — containment-exempt, always created
         try:
             st = os.stat(g)
@@ -491,7 +521,7 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
             continue
         out.append({"path": g, "name": os.path.basename(g), "size": st.st_size,
                     "kind": "created", "mtime": st.st_mtime})
-    out.sort(key=lambda a: -a.get("mtime", 0))  # freshest-first even root-less
+    out.sort(key=lambda a: (0 if a.get("declared") else 1, -a.get("mtime", 0)))
     if not root:
         return out[:limit]
     seen_rc = {a["path"] for a in out}
@@ -524,7 +554,9 @@ def session_artifacts(path, limit=50, source=None, cwd=None):
                         "kind": kind, "mtime": st.st_mtime})
             if len(out) >= limit:
                 break
-    out.sort(key=lambda a: -a.get("mtime", 0))  # most-recently-written first
+    # a formally published artifact is the point of the session — it leads,
+    # however old its file is. Everything else is newest-first behind it.
+    out.sort(key=lambda a: (0 if a.get("declared") else 1, -a.get("mtime", 0)))
     return out
 
 

@@ -119,6 +119,8 @@ body.browser #panel {
 .row.sel .meta-idle, .row-line:hover .meta-idle { display: none; }   /* idle meta hides; icons take its place */
 .row .m .proj { color: rgba(255,255,255,0.55); }
 .row .m .when { min-width: 30px; text-align: right; color: rgba(255,255,255,0.7); font-weight: 500; }
+.srcf-self { opacity:.5; }
+.srcf-self.on, .srcf-self:hover { opacity:1; }
 .recent-tag { font: 500 9.5px ui-monospace, Menlo, monospace; letter-spacing: 0.06em;
   text-transform: uppercase; color: rgba(255,255,255,0.35);
   border: 1px solid rgba(255,255,255,0.12); border-radius: 5px; padding: 1px 5px; }
@@ -213,6 +215,533 @@ kbd.ghostkey { color: var(--dim); margin-left: 4px; }
 .share.small { padding: 4px 14px; font-size: 11.5px; }
 .share.ghost { background: var(--fill); border: 1px solid var(--hair); color: var(--dim); animation: none; }
 .share.ghost:hover { color: var(--ink); background: rgba(255,255,255,0.09); filter: none; }
+.rvbtn.on { color: #6ea8fe; opacity: 1; }
+.rvbtn.on.working { animation: rvpulse 1s ease-in-out infinite; }
+@keyframes rvpulse { 0%,100% { opacity: .5 } 50% { opacity: 1 } }
+/* row state: amber pulsing = an agent is mid-turn, green = done and unread */
+.glyph.st-working, .glyph.st-done { border-radius:99px; }
+.glyph.st-working { box-shadow:0 0 0 1.6px rgba(240,180,41,.9), 0 0 9px rgba(240,180,41,.3);
+  animation: glyphLive 1.9s ease-in-out infinite; }
+.glyph.st-done { box-shadow:0 0 0 1.6px rgba(67,197,158,.95), 0 0 8px rgba(67,197,158,.28); }
+@keyframes glyphLive {
+  0%,100% { box-shadow:0 0 0 1.6px rgba(240,180,41,.9), 0 0 4px rgba(240,180,41,.22); }
+  50%     { box-shadow:0 0 0 1.6px rgba(240,180,41,1), 0 0 13px rgba(240,180,41,.6); } }
+/* one-line source chips with the app's own mark */
+.srcf-app { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.srcf-g { display:inline-flex; width:12px; height:12px; opacity:.85; }
+.srcf-g svg { width:100%; height:100%; }
+.srcf-app b { font-weight:600; opacity:.72; font-variant-numeric:tabular-nums; }
+.live-dot.working { background:#f0b429; box-shadow:0 0 0 0 rgba(240,180,41,.6);
+  animation: liveGlow 1.6s ease-out infinite; }
+.live-dot.done { background:#43c59e; box-shadow:0 0 7px rgba(67,197,158,.75); }
+@keyframes liveGlow {
+  0% { box-shadow:0 0 0 0 rgba(240,180,41,.55); }
+  70% { box-shadow:0 0 0 6px rgba(240,180,41,0); }
+  100% { box-shadow:0 0 0 0 rgba(240,180,41,0); } }
+/* the reviewer's mark is a lens that sweeps while it reads */
+.rvdot { display:inline-flex; width:13px; height:13px; color:#6ea8fe;
+  margin-right:7px; vertical-align:middle; }
+.rvdot svg { width:100%; height:100%; }
+.lens-btn svg, .rvdot svg { overflow:visible; }
+.rvdot.working .lens, .rvbtn.working .lens { animation: lensSweep 2.2s ease-in-out infinite;
+  transform-origin:7px 7px; }
+.rvdot.working, .rvbtn.working { animation: lensBlip 1.4s ease-in-out infinite; }
+@keyframes lensBlip { 0%,100% { opacity:.45 } 50% { opacity:1 } }
+@keyframes lensSweep {   /* a small orbit, so it reads as scanning */
+  0%   { transform:translate(-1.3px,-1.1px) }
+  25%  { transform:translate(1.3px,-1.1px) }
+  50%  { transform:translate(1.5px,1.2px) }
+  75%  { transform:translate(-1.2px,1.2px) }
+  100% { transform:translate(-1.3px,-1.1px) } }
+
+.rvchip { white-space: nowrap; } .rvchip .dot { animation: rvpulse 2.4s ease-in-out infinite; }
+.rvchip.has .dot { background: #e0b252; }
+.rv-wrap { padding:14px 16px 20px; overflow-y:auto; letter-spacing:-.05px; }
+.rv-top { display:flex; align-items:center; gap:7px; font-size:13px; margin-bottom:14px; }
+.rv-arrow { color: var(--faint); }
+.rv-ttl { color: var(--faint); margin-left:4px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; max-width:300px; }
+.rv-live-dot { width:7px; height:7px; border-radius:99px; background:#43c59e; flex:none;
+  animation: rvpulse 2.6s ease-in-out infinite; }
+.rv-live-dot.busy { background:#6ea8fe; animation: rvpulse .9s ease-in-out infinite; }
+.rv-stop { background:none; border:1px solid var(--line,#262b36); color:var(--faint);
+  border-radius:99px; padding:2px 10px; font-size:11px; cursor:pointer; }
+.rv-stop:hover { color: var(--ink); }
+/* form controls do not inherit the page typeface on their own, so every button
+   and input in this panel was rendering in the UA default (Arial) */
+.rv-wrap button, .rv-wrap input, .rv-wrap textarea { font-family: inherit; }
+/* --- mood ------------------------------------------------------------
+   Simple data, so the design is typographic rather than chart-led: one
+   statement, one segmented bar per agent (the macOS storage-bar idea), and
+   the user's own words at a size that lands. No legend, no axes, no pie. */
+.md-wrap { padding:12px 20px 10px; overflow:hidden; letter-spacing:-.05px;
+  height:100%; box-sizing:border-box; display:flex; flex-direction:column; gap:8px; }
+.md-top { display:flex; align-items:center; gap:14px; flex:none; }
+.md-eyebrow { font-size:10.5px; letter-spacing:.7px; text-transform:uppercase;
+  color:var(--faint); flex:none; }
+.md-busy { font-size:11px; color:#6ea8fe; animation: rvpulse 1.4s ease-in-out infinite; }
+/* two panels left, quotes right, filling the panel exactly once */
+.md-stage { display:flex; gap:14px; align-items:stretch; flex:1; min-height:0; }
+.md-left { flex:none; width:198px; display:flex; flex-direction:column; gap:10px; }
+.md-score { flex:none; position:relative; overflow:hidden; display:flex;
+  flex-direction:column; align-items:flex-start; gap:0;
+  padding:10px 15px 9px; border-radius:14px;
+  border:1px solid var(--line,#262b36); background:rgba(255,255,255,.03); }
+.md-score::before { content:""; position:absolute; left:30%; top:-30%; width:80%; height:130%;
+  background:radial-gradient(closest-side, var(--glow, transparent), transparent 70%);
+  pointer-events:none; }
+.md-score > * { position:relative; }
+.md-face-xl { font-size:22px; line-height:1; margin-bottom:4px; }
+.md-score-n { font-size:42px; font-weight:700; letter-spacing:-1.6px;
+  line-height:1; font-variant-numeric:tabular-nums;
+  font-family:ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, sans-serif; }
+.md-score-w { font-size:13px; color:var(--dim); margin-top:2px;
+  font-weight:600; letter-spacing:-.1px;
+  font-family:ui-rounded, "SF Pro Rounded", -apple-system, sans-serif; }
+.md-score-c { font-size:9.5px; color:var(--faint); margin-top:8px; line-height:1.35;
+  letter-spacing:.4px; text-transform:uppercase; }
+.md-score.s-calm { --glow:rgba(67,197,158,.16); }
+.md-score.s-mixed { --glow:rgba(91,127,168,.18); }
+.md-score.s-frustrated { --glow:rgba(240,180,41,.15); }
+.md-score.s-angry { --glow:rgba(194,56,79,.2); }
+.md-score.s-calm .md-score-n { color:#7fe0bd; text-shadow:0 0 22px rgba(67,197,158,.42); }
+.md-score.s-mixed .md-score-n { color:#8fb0d8; text-shadow:0 0 22px rgba(143,176,216,.4); }
+.md-score.s-frustrated .md-score-n { color:#f0b429; text-shadow:0 0 22px rgba(240,180,41,.4); }
+.md-score.s-angry .md-score-n { color:#e2687f; text-shadow:0 0 22px rgba(226,104,127,.45); }
+/* per agent: strict grid, bar spans underneath — nothing can escape the box */
+.md-panel { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column;
+  border:1px solid var(--line,#262b36);
+  border-radius:14px; padding:2px 13px 6px; background:rgba(255,255,255,.02); }
+.md-rows { flex:none; min-height:0; }
+.md-mini-c { font-size:10px; color:var(--faint); font-variant-numeric:tabular-nums;
+  letter-spacing:.2px; }
+.md-mini.thin .md-mini-s, .md-mini.thin .md-mini-bar i { opacity:.55; }
+.md-mini { display:grid; grid-template-columns:14px minmax(0,1fr) auto auto;
+  align-items:center; gap:4px 8px; padding:4px 0;
+  border-bottom:1px solid rgba(255,255,255,.05); }
+.md-mini:last-child { border-bottom:0; }
+.md-mini .rvg { width:14px; height:14px; opacity:.9; }
+.md-mini-n { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+  font-size:12.5px; font-weight:600; }
+.md-mini-s { font-size:14px; font-weight:700; font-variant-numeric:tabular-nums;
+  letter-spacing:-.3px;
+  font-family:ui-rounded, "SF Pro Rounded", -apple-system, sans-serif; }
+.md-mini-bar { grid-column:1 / -1; height:5px; border-radius:99px;
+  background:rgba(255,255,255,.07); overflow:hidden;
+  box-shadow:inset 0 1px 1px rgba(0,0,0,.35); }
+.md-mini-bar i { display:block; height:100%; border-radius:99px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 0 10px var(--fg, transparent); }
+.s-calm-f { --fg:rgba(67,197,158,.5); background:linear-gradient(180deg,#5ad7b0,#37b189); }
+.s-mixed-f { --fg:rgba(91,127,168,.5); background:linear-gradient(180deg,#7fa3cd,#4d6f96); }
+.s-frustrated-f { --fg:rgba(240,180,41,.45); background:linear-gradient(180deg,#ffc94d,#dfa016); }
+.s-angry-f { --fg:rgba(194,56,79,.5); background:linear-gradient(180deg,#e0566f,#ab2b41); }
+.s-calm-t { color:#7fe0bd; } .s-mixed-t { color:#8fb0d8; }
+.s-frustrated-t { color:#f0b429; } .s-angry-t { color:#e2687f; }
+.md-none.quiet { font-size:10.5px; color:var(--faint); padding:4px 2px 0;
+  letter-spacing:.2px; }
+.md-receipts { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px;
+  overflow-y:auto; }
+.md-chip { min-width:0; flex:none; border-radius:12px; border:1px solid var(--line,#262b36);
+  background:rgba(255,255,255,.02); overflow:hidden; transition:background .18s; }
+.md-chip:hover { background:rgba(255,255,255,.05); }
+.md-chip.open { background:rgba(255,255,255,.05); border-color:var(--dim); }
+.md-chip.good { border-left:2px solid #43c59e; }
+.md-chip.bad { border-left:2px solid #f0b429; }
+.md-chip-b { display:grid; grid-template-columns:auto minmax(0,1fr); gap:2px 10px; width:100%;
+  padding:9px 12px; text-align:left; background:none; border:0; cursor:pointer;
+  color:var(--ink); font-family:inherit; }
+.md-chip-i { grid-row:span 2; font-size:15px; line-height:1.25; }
+.md-chip-t { font-size:12.5px; line-height:1.4; overflow:hidden;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.md-chip.open .md-chip-t { -webkit-line-clamp:none; }
+.md-chip-w { font-size:10.5px; color:rgba(255,255,255,.45); display:flex;
+  align-items:center; gap:5px; flex-wrap:wrap; row-gap:4px; min-width:0; }
+.md-chip-w em { font-style:normal; opacity:.8; }
+.md-tags { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:7px; }
+.md-tag { font-size:10px; font-weight:600; letter-spacing:.1px; padding:2px 7px;
+  font-family:ui-rounded, "SF Pro Rounded", -apple-system, sans-serif;
+  border-radius:5px; white-space:nowrap; flex:none; }
+.md-tag.bad { color:#f0c579; background:rgba(240,180,41,.14);
+  border:1px solid rgba(240,180,41,.28); }
+.md-tag.good { color:#7fe0bd; background:rgba(67,197,158,.13);
+  border:1px solid rgba(67,197,158,.28); }
+.md-chip-x { padding:0 12px 11px 37px; }
+.md-chip-x p { margin:0 0 7px; font-size:12px; line-height:1.5; color:var(--dim); }
+.md-chip-meta { display:flex; align-items:center; gap:9px; font-size:10.5px;
+  color:rgba(255,255,255,.45); flex-wrap:wrap; }
+.md-open { margin-left:auto; flex:none; background:none; border:1px solid var(--line,#262b36);
+  border-radius:99px; padding:3px 10px; font-size:10.5px; font-family:inherit;
+  color:var(--faint); cursor:pointer; }
+.md-open:hover { color:var(--ink); border-color:var(--dim); }
+.md-line1 { flex:none; font-size:12.5px; color:var(--dim); margin:0; line-height:1.45; }
+.md-line1 b { color:var(--ink); font-weight:700; font-variant-numeric:tabular-nums;
+  font-family:ui-rounded, "SF Pro Rounded", -apple-system, sans-serif; }
+.md-line1 span { color:var(--faint); margin-left:8px; font-size:11px; }
+/* a sparkline beside the numbers, not a slab across the bottom */
+.md-vs { flex:none; margin-top:5px; padding-top:5px;
+  border-top:1px solid rgba(255,255,255,.06); }
+.md-vs-r { display:grid; grid-template-columns:34px minmax(0,1fr) 26px;
+  align-items:center; gap:7px; margin-top:4px; }
+.md-vs-l { font-size:9.5px; letter-spacing:.4px; text-transform:uppercase;
+  color:var(--faint); }
+.md-vs-n { font-size:11.5px; font-weight:700; text-align:right; color:var(--faint);
+  font-variant-numeric:tabular-nums;
+  font-family:ui-rounded, "SF Pro Rounded", -apple-system, sans-serif; }
+.md-vs-r .md-mini-bar { grid-column:auto; height:6px; }
+.md-vs-r.now .md-mini-bar { height:8px; }
+.s-past-f { background:rgba(255,255,255,.2); }
+.md-trend { flex:1; min-height:0; display:flex; flex-direction:column;
+  margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,.06); }
+.md-trend-h { display:flex; align-items:center; gap:6px; font-size:9.5px; letter-spacing:.5px;
+  text-transform:uppercase; color:var(--faint); margin-bottom:4px; }
+.md-trend-h .grow { flex:1; }
+.md-spark { display:flex; align-items:flex-end; gap:2px; flex:1; min-height:14px; height:22px; }
+.md-spark i { flex:1; min-width:0; border-radius:2px; display:block; opacity:.85;
+  transition:opacity .14s; }
+.md-spark i:hover { opacity:1; }
+.md-spark i.gap { height:3px; background:rgba(255,255,255,.07); align-self:flex-end; }
+.md-trend { position:relative; }
+.md-tip { position:absolute; bottom:34px; z-index:5; pointer-events:none;
+  background:rgba(28,30,36,.97); border:1px solid var(--line,#262b36); border-radius:8px;
+  padding:5px 9px; font-size:10.5px; color:var(--faint); white-space:nowrap;
+  box-shadow:0 6px 20px rgba(0,0,0,.45); }
+.md-tip b { display:block; color:var(--ink); font-weight:700; font-size:12px;
+  font-family:ui-rounded, "SF Pro Rounded", -apple-system, sans-serif;
+  font-variant-numeric:tabular-nums; margin-bottom:1px; }
+.md-spark i.s-calm { background:#43c59e; } .md-spark i.s-mixed { background:#5b7fa8; }
+.md-spark i.s-frustrated { background:#f0b429; } .md-spark i.s-angry { background:#c2384f; }
+.md-none { color:var(--faint); font-size:11.5px; padding:10px 13px;
+  border:1px dashed var(--line,#262b36); border-radius:12px; }
+.md-read { flex:none; background:rgba(110,168,254,.14); border:1px solid rgba(110,168,254,.4);
+  color:#9dc0f5; border-radius:99px; padding:5px 13px; font-size:11.5px; font-family:inherit;
+  cursor:pointer; min-width:112px; }
+.md-read:hover { background:rgba(110,168,254,.24); }
+.md-read:disabled { opacity:.55; cursor:default; }
+.md-blocker { border:1px solid rgba(224,112,94,.4); background:rgba(224,112,94,.08);
+  border-radius:10px; padding:12px 14px; font-size:12.5px; flex:none; }
+.md-blocker.warn { border-color:rgba(224,178,82,.4); background:rgba(224,178,82,.08); }
+.md-blocker b { display:block; margin-bottom:4px; font-size:13px; }
+.md-blocker span { color:var(--faint); }
+.md-empty { padding:8px 0 20px; }
+.md-empty .md-read { margin-top:14px; padding:8px 18px; font-size:12.5px; }
+.md-art { display:block; width:230px; max-width:60%; margin:6px 0 20px; opacity:.9; }
+.md-hero { font-size:21px; line-height:1.2; font-weight:600; letter-spacing:-.5px;
+  margin:0 0 7px; max-width:30ch; }
+.md-sub { font-size:12.5px; line-height:1.5; color:var(--faint); margin:0 0 8px; max-width:62ch; }
+@keyframes mdRise { from { opacity:0; transform:translateY(7px) } to { opacity:1; transform:none } }
+.md-anim .md-score, .md-anim .md-panel, .md-anim .md-chip, .md-anim .md-line1 {
+  animation: mdRise .4s cubic-bezier(.2,.7,.3,1) both; }
+.md-anim .md-chip:nth-child(2) { animation-delay:70ms }
+.md-anim .md-chip:nth-child(3) { animation-delay:140ms }
+.md-sec { font-size:10.5px; letter-spacing:.7px; text-transform:uppercase;
+  color:var(--faint); padding-bottom:7px; border-bottom:1px solid var(--line,#262b36);
+  margin-bottom:4px; }
+/* the page should arrive, not appear: rows and quotes settle in sequence */
+@keyframes mdRise { from { opacity:0; transform:translateY(7px) } to { opacity:1; transform:none } }
+.md-hero, .md-sub, .md-row, .md-q, .md-key, .md-sec {
+  animation: mdRise .42s cubic-bezier(.2,.7,.3,1) both; }
+.md-sub { animation-delay:60ms }
+/* opacity only — animating scaleX made the bars measure (and briefly look)
+   like slivers, since transforms distort layout geometry */
+.md-cells i { animation: mdFade .45s ease both; }
+@keyframes mdFade { from { opacity:0 } to { opacity:1 } }
+.md-q { margin:0; padding:12px 0; border-bottom:1px solid var(--line,#262b36);
+  display:flex; gap:14px; align-items:flex-start; }
+.md-face { font-size:17px; line-height:1.25; flex:none; width:26px; text-align:center;
+  filter:saturate(1.05); }
+.md-q blockquote { margin:0 0 5px; font-size:13.5px; line-height:1.42; font-weight:500;
+  letter-spacing:-.1px; }
+.md-q blockquote::before { content:"\201C"; }
+.md-q blockquote::after { content:"\201D"; }
+.md-q figcaption { font-size:11.5px; color:var(--faint); line-height:1.5; }
+.md-src { display:block; font-size:10.5px; margin-top:3px; color:rgba(255,255,255,.42); }
+.md-err { color:#e0705e; font-size:12px; margin-top:18px; }
+/* --- reviewers list: one card per agent under review ---
+   Type scale sits one step below the app's 14px body, not three. */
+.rvc { border:1px solid var(--line,#262b36); border-radius:12px; margin-bottom:9px;
+  transition:border-color .18s, background .18s; }
+.rvc:hover { border-color:var(--dim); }
+.rvc.open { border-color:rgba(110,168,254,.32); background:rgba(110,168,254,.035); }
+.rvc-head, .rvc-by, .rvc-lede { user-select:none; }
+.rvc-head { display:flex; align-items:center; gap:9px; padding:14px 16px 0; cursor:pointer; }
+.rvc-ar { color:var(--faint); margin:0 3px; }
+.rvc-by { display:flex; align-items:center; gap:5px; padding:5px 16px 0 30px;
+  color:var(--faint); font-size:12px; cursor:pointer; }
+.rvg { display:inline-flex; width:13px; height:13px; opacity:.85; }
+.rvg svg { width:100%; height:100%; display:block; }
+.rvc-ttl { font-size:14px; font-weight:600; letter-spacing:-.15px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.rvc-state { color:var(--faint); font-size:12px; white-space:nowrap; }
+/* always visible: a primary verb behind a hover is a hidden verb */
+.rvc-ask input { width:280px; background:rgba(255,255,255,.05);
+  border:1px solid rgba(110,168,254,.45); border-radius:99px; padding:4px 12px;
+  color:var(--ink); font-size:11.5px; font-family:inherit; outline:none; }
+.rvc-ask input::placeholder { color:var(--faint); }
+.rvc-now { background:none; border:1px solid var(--line,#262b36); color:var(--faint);
+  border-radius:99px; padding:3px 10px; font-size:11.5px; cursor:pointer; white-space:nowrap;
+  transition:color .15s, border-color .15s; }
+.rvc-now:hover { color:var(--ink); border-color:var(--dim); }
+.rvc-state em { font-style:normal; }
+.rvc-run { color:#6ea8fe; animation: rvpulse 1.4s ease-in-out infinite; }
+.rvc-wait { color:#e0b252; }
+.rvc-paused { color:var(--faint); }
+.rv-live-dot.off { background:var(--faint); animation:none; }
+.rvc.paused { opacity:.55; }
+.rvc.paused:hover { opacity:.8; }
+.rv-stop.go { color:#7fd8b8; border-color:rgba(67,197,158,.45); }
+.rvc-caret { color:var(--faint); font-size:15px; transition:transform .18s; display:inline-block; }
+.rvc-caret.open { transform:rotate(90deg); }
+.rvc-lede { display:flex; align-items:baseline; gap:10px;
+  padding:9px 30px 15px 30px; color:var(--dim); font-size:12.5px; line-height:1.5;
+  cursor:pointer; }
+.rvc-lede > span:first-child { flex:1; min-width:0; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.rvc-lede.hot { color:#e6c894; }
+.rvc-lede .rvc-t { flex:none; opacity:.6; font-variant-numeric:tabular-nums; font-size:11.5px; }
+.rvc-body { padding:14px 16px 16px; border-top:1px solid var(--line,#262b36); margin-top:13px; }
+.rvc-acts { display:flex; align-items:center; gap:6px; margin-bottom:14px; }
+.rvc-stats { color:var(--faint); font-size:12px; }
+.rv-live-dot.wait { background:#e0b252; }
+/* one review inside a card */
+.rvi { border-top:1px solid var(--line,#262b36); }
+.rvi:first-of-type { border-top:0; }
+.rvi-head { display:flex; align-items:center; gap:10px; padding:12px 0; cursor:pointer;
+  font-size:13.5px; }
+.rvi-head:hover .rvi-title { color:var(--ink); }
+.rvi-t { color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums;
+  width:40px; flex:none; }
+.rvi-title { color:var(--dim); flex:1; min-width:0; line-height:1.5;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.rvi.open .rvi-title { display:block; -webkit-line-clamp:none; overflow:visible; }
+.rvi.open .rvi-title { white-space:normal; overflow:visible; color:var(--ink);
+  font-weight:600; letter-spacing:-.1px; }
+.rvi.open .rvi-head { align-items:flex-start; }
+.rvi.open .rvi-t, .rvi.open .rvi-tag, .rvi.open .rvi-caret { padding-top:1px; }
+.rvi.open .rvi-title { color:var(--ink); }
+.rvi.hot .rvi-title { color:var(--ink); }
+.rvi-cta.sev3 { border-color:rgba(224,112,94,.55); background:rgba(224,112,94,.07); }
+.rvi-cta.sev3 .rvi-cta-h { color:#ff9b8b; }
+.rvi-sev { font-size:10.5px; letter-spacing:.3px; flex:none; border-radius:4px;
+  padding:2px 7px; border:1px solid transparent; }
+.rvi-sev.s1 { color:var(--faint); border-color:rgba(255,255,255,.16); }
+.rvi-sev.s2 { color:#f0c579; border-color:rgba(224,178,82,.4); background:rgba(224,178,82,.1); }
+.rvi-sev.s3 { color:#ff9b8b; border-color:rgba(224,112,94,.5); background:rgba(224,112,94,.14);
+  font-weight:600; }
+.rvi-sev.big { margin-right:9px; vertical-align:1px; }
+.rvi-tick { display:inline-flex; width:13px; height:13px; margin-right:6px; vertical-align:-2px; }
+.rvi-tick svg { width:100%; height:100%; }
+.rvi-done { display:inline-flex; align-items:center; font-size:11.5px; color:#43c59e; flex:none; }
+.rvi-cta.sent .rvi-cta-h { color:#43c59e; }
+.rvc-cta { display:flex; align-items:center; gap:7px; padding:0 16px 14px 30px; }
+.rvc-cta.calm .rv-go { background:none; border-color:rgba(255,255,255,.22); color:var(--dim); }
+.rvc-cta.calm .rv-go:hover { color:var(--ink); border-color:var(--dim); background:none; }
+.rvi-tag { font-size:11.5px; color:#e0b252; flex:none; }
+.rvi-tag.calm { color:var(--faint); }
+.rvi:hover .rvi-tag.calm, .rvi.open .rvi-tag.calm { color:var(--dim); }
+.rvi.open .rvi-tag, .rvi:hover .rvi-tag { color:#f0c579; }
+.rvi-quiet { font-size:11.5px; color:var(--faint); flex:none; opacity:.45; transition:opacity .15s; }
+.rvi:hover .rvi-quiet, .rvi.open .rvi-quiet { opacity:1; }
+.rvi-caret { color:var(--faint); font-size:15px; display:inline-block; transition:transform .18s; }
+.rvi-caret.open { transform:rotate(90deg); }
+/* a shimmer says "working" better than the words "nothing yet" */
+.rv-skel { padding:14px 0 4px; }
+.rv-skel i { display:block; height:9px; border-radius:5px; margin-bottom:11px;
+  background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.12),rgba(255,255,255,.05));
+  background-size:220% 100%; animation: rvshim 1.5s ease-in-out infinite; }
+.rv-skel i:nth-child(2) { width:78%; animation-delay:.12s }
+.rv-skel i:nth-child(3) { width:88%; animation-delay:.24s }
+.rv-skel i:nth-child(4) { width:62%; animation-delay:.36s }
+@keyframes rvshim { 0% { background-position:120% 0 } 100% { background-position:-120% 0 } }
+.rvi-body { padding:2px 0 14px 47px; }
+.rvi-noact { color:var(--faint); font-size:12.5px; line-height:1.6; margin-top:4px;
+  padding:9px 12px; border-left:2px solid var(--line,#262b36); }
+.rvi-noact b { color:var(--dim); font-weight:600; }
+.rvi-link { background:none; border:0; padding:0; margin-left:6px; color:var(--faint);
+  font-size:11.5px; font-family:inherit; text-decoration:underline; cursor:pointer; }
+.rvi-link:hover { color:var(--ink); }
+/* the only call to action in the panel */
+.rvi-cta { border:1px solid var(--line,#262b36); background:rgba(255,255,255,.02);
+  border-radius:10px; padding:12px 13px; margin-top:13px; }
+.rvi-cta.urgent { border-color:rgba(224,178,82,.4); background:rgba(224,178,82,.055); }
+.rvi-cta.calm .rvi-cta-h { color:var(--dim); font-weight:500; }
+.rvi-cta.sent, .rvi-cta.sent.sev3 { border-color:var(--line,#262b36);
+  background:rgba(255,255,255,.02); }
+.rvi-cta.sent .rvi-cta-h, .rvi-cta.sent.sev3 .rvi-cta-h { color:var(--faint); }
+.rvi-cta.sent .rvi-sev { opacity:.55; }
+.rvi-cta-h { font-size:13px; font-weight:600; color:#f0c579; margin-bottom:10px; }
+.rvi-cta.calm .rv-go { background:none; border-color:rgba(255,255,255,.22); color:var(--dim); }
+.rvi-cta.calm .rv-go:hover { color:var(--ink); border-color:var(--dim); background:none; }
+.rvi-cta.sent .rvi-cta-h { color:var(--faint); font-weight:400; }
+.rvi-cta .rv-pre { margin:11px 0 0; max-height:220px; }
+.rvi-cta-b { font-size:13.5px; line-height:1.65; color:var(--ink); margin-bottom:14px;
+  max-height:none; }
+.rvi-cta-b p { margin:0 0 9px; }
+.rvi-cta-b p:last-child { margin-bottom:0; }
+.rvi-src { color:var(--faint); font-size:11.5px; margin-top:11px; }
+.rv-dim { color:var(--faint); }
+.tx-verdict b { display:block; margin-bottom:7px; font-weight:600; }
+.tx-verdict .rv-bul li { font-size:12.5px; margin-bottom:6px; }
+.rv-trunc { color:var(--faint); font-size:11px; padding:6px 0 10px;
+  border-bottom:1px solid var(--line,#262b36); margin-bottom:12px; }
+/* the one thing that should survive a glance across the whole panel */
+.rv-alert { display:flex; align-items:center; gap:9px; padding:11px 14px; margin-bottom:14px;
+  border:1px solid rgba(224,178,82,.45); background:rgba(224,178,82,.09);
+  border-radius:10px; cursor:pointer; font-size:12.5px; }
+.rv-alert:hover { background:rgba(224,178,82,.14); }
+.rv-alert b { color:#f0c579; font-weight:600; white-space:nowrap; }
+.rv-alert-t { color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rv-alert-go { color:#f0c579; white-space:nowrap; }
+.rv-alert-d { width:7px; height:7px; border-radius:99px; background:#e0b252; flex:none;
+  animation: rvpulse 1.6s ease-in-out infinite; }
+.rvi-src code { font-size:11px; background:rgba(255,255,255,.06); border-radius:4px; padding:1px 5px; }
+.rvi-more { background:none; border:1px solid rgba(255,255,255,.15); border-radius:7px;
+  padding:4px 10px; margin-top:14px; color:var(--faint); font-size:12px; font-family:inherit; cursor:pointer; }
+.rvi-more:hover, .rvi-more.on { color:var(--ink); border-color:rgba(255,255,255,.3); }
+.rvi-body .rv-bul { margin-top:10px; }
+#rv-pane.live { position:relative; }
+#rv-pane.live::before { content:""; position:absolute; left:0; right:0; top:0; height:1px;
+  background:linear-gradient(90deg,transparent,#6ea8fe,transparent);
+  animation: rvslide 1.5s cubic-bezier(.4,0,.6,1) infinite; }
+.rv-head { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+.rv-head h2 { font-size:15px; font-weight:600; letter-spacing:-.15px; margin:0; }
+.rv-status { color:var(--faint); font-size:11.5px; margin-bottom:12px; }
+.rv-mid { opacity:.45; margin:0 6px; }
+/* one hairline that only moves while the reviewer is actually reading */
+.rv-thread { height:1px; background:var(--line,#262b36); margin-bottom:18px;
+  overflow:hidden; position:relative; }
+.rv-thread.on::after { content:""; position:absolute; inset:0; width:34%;
+  background:linear-gradient(90deg,transparent,#6ea8fe,transparent);
+  animation: rvslide 1.5s cubic-bezier(.4,0,.6,1) infinite; }
+.rv-blank { padding:26px 0 22px; max-width:430px; }
+.rv-blank b { display:block; font-size:13.5px; font-weight:600; margin-bottom:5px; }
+.rv-blank span { color:var(--faint); font-size:12.5px; line-height:1.6; }
+.rv-inst { display:inline-block; background:none; border:1px dashed rgba(255,255,255,.17);
+  border-radius:7px; padding:5px 11px; margin:0 0 16px; color:var(--faint);
+  font-size:12px; font-family:inherit; cursor:pointer; }
+.rv-inst:hover { color:var(--ink); }
+.rv-inst.open { border-bottom:1px solid var(--line,#262b36); padding-bottom:7px;
+  cursor:default; text-transform:none; letter-spacing:0; display:flex; align-items:center; }
+#rv-focus { flex:1; background:none; border:0; outline:none; color:var(--ink);
+  font-size:12.5px; font-family:inherit; padding:0; }
+#rv-focus::placeholder { color:var(--faint); }
+/* the review itself: a rule in the severity colour, then the words */
+.rv-item { display:flex; gap:14px; padding:16px 0; border-top:1px solid var(--line,#262b36); }
+.rv-item:first-of-type { border-top:0; padding-top:2px; }
+.rv-item .rv-when { color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums;
+  width:52px; flex:none; padding-top:2px; }
+.rv-item .rv-when em { display:block; font-style:normal; font-size:9.5px; letter-spacing:.5px;
+  text-transform:uppercase; color:#e0b252; margin-top:3px; }
+.rv-item .rv-body { flex:1; min-width:0; }
+.rv-head-line { font-size:13px; font-weight:600; line-height:1.5; margin-bottom:8px; }
+.rv-item.s2 .rv-head-line { color:#f0c579; }
+.rv-item.s3 .rv-head-line { color:#f0897a; }
+.rv-bul { margin:0; padding:0; list-style:none; }
+.rv-bul li { position:relative; padding-left:16px; font-size:13.5px; line-height:1.65;
+  margin-bottom:9px; }
+.rv-bul li::before { content:""; position:absolute; left:2px; top:8.5px; width:4px; height:4px;
+  border-radius:99px; background:#6ea8fe; }
+.rv-bul.dim li { font-size:12.5px; color:var(--faint); }
+.rv-bul.dim li::before { background:var(--faint); }
+.rv-pre { white-space:pre-wrap; font:12px/1.6 ui-monospace,Menlo,monospace; color:var(--faint);
+  background:rgba(0,0,0,.24); border-radius:8px; padding:11px; margin:12px 0 0; max-height:200px;
+  overflow:auto; }
+.rv-acts { display:flex; gap:7px; align-items:center; margin-top:13px; }
+.rv-go, .rv-ghost { border-radius:7px; padding:6px 13px; font-size:12.5px; font-family:inherit;
+  cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+  border:1px solid transparent; transition:background .15s, color .15s, border-color .15s; }
+.rv-go i { display:inline-flex; width:13px; height:13px; }
+.rv-go i svg { width:100%; height:100%; }
+/* one verb in words, the rest as marks — four labelled buttons was a barrage */
+.rv-ic { width:30px; height:28px; padding:0; display:inline-flex; align-items:center;
+  justify-content:center; background:none; border:1px solid rgba(255,255,255,.16);
+  border-radius:7px; color:var(--faint); cursor:pointer;
+  transition:color .15s, border-color .15s; }
+.rv-ic svg { width:15px; height:15px; }
+.rv-ic:hover { color:var(--ink); border-color:var(--dim); }
+.rv-ic.no:hover { color:#e0705e; border-color:rgba(224,112,94,.45); }
+.rv-go { background:#2c62c4; color:#fff; }
+.rv-go:hover { background:#3672de; }
+.rv-go.done { background:none; border-color:rgba(255,255,255,.2); color:var(--dim); }
+.rv-go.done:hover { color:var(--ink); border-color:var(--dim); }
+.rv-go[disabled] { opacity:.55; cursor:default; }
+.rv-ghost { background:none; border-color:rgba(255,255,255,.2); color:var(--dim); }
+.rv-ghost:hover { color:var(--ink); border-color:var(--dim); }
+.rv-sent { color:#43c59e; font-size:11px; margin-left:3px; }
+.rv-bar { height:5px; background:rgba(255,255,255,.07); border-radius:99px; overflow:hidden; }
+.rv-bar i { display:block; height:100%; background:#6ea8fe; border-radius:99px;
+  transition: width .6s cubic-bezier(.4,0,.2,1); }
+.rv-bar.run i { width:38%!important;
+  background:linear-gradient(90deg,transparent,#6ea8fe,transparent);
+  animation: rvslide 1.25s linear infinite; }
+@keyframes rvslide { 0% { transform:translateX(-110%) } 100% { transform:translateX(320%) } }
+.rv-sub { color:var(--faint); font-size:11px; margin-top:7px; }
+.rv-sec { font-size:10.5px; text-transform:uppercase; letter-spacing:.8px; color:var(--faint);
+  margin-bottom:6px; }
+.rv-row { display:flex; gap:12px; padding:10px 0; border-top:1px solid var(--line,#262b36); }
+.rv-row .rv-bul { flex:1; min-width:0; }
+.rv-when { color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums; }
+.rv-rbody { flex:1; font-size:12.5px; }
+.rv-empty { color:var(--faint); font-size:12.5px; padding:10px 0; line-height:1.6; }
+.rv-tog { float:right; cursor:pointer; text-transform:none; letter-spacing:0; }
+.rv-saved { color:#43c59e; font-size:11px; margin-left:8px; }
+.rv-tog:hover { color: var(--ink); }
+.rv-msg { display:flex; gap:9px; padding:7px 0; border-top:1px solid var(--line,#262b36);
+  font-size:12.5px; line-height:1.55; }
+.rv-msg i { font-style:normal; font-size:10px; text-transform:uppercase; letter-spacing:.5px;
+  color:var(--faint); min-width:58px; padding-top:2px; }
+.rv-msg.assistant i { color:#6ea8fe; }
+.rv-msg.tool i { color:#c98a5e; }
+.rv-tabs { display:flex; gap:14px; align-items:center; margin:18px 0 4px;
+  border-bottom:1px solid var(--line,#262b36); padding-bottom:7px; }
+.rv-tab { font-size:12px; letter-spacing:.1px; color:var(--faint);
+  cursor:pointer; padding-bottom:6px; margin-bottom:-8px; border-bottom:1.5px solid transparent; }
+.rv-tab:hover { color:var(--ink); }
+.rv-tab.on { color:var(--ink); border-bottom-color:#6ea8fe; }
+.rv-stream .msg { display:flex; gap:10px; padding:7px 0; font-size:12.5px; line-height:1.55;
+  border-top:1px solid var(--line,#262b36); }
+.rv-stream .msg:first-child { border-top:0; }
+.rv-stream .msg i { font-style:normal; font-size:10px; text-transform:uppercase;
+  letter-spacing:.5px; min-width:62px; padding-top:2px; color:var(--faint); }
+.rv-stream .msg.a i { color:#6ea8fe; } .rv-stream .msg.t i { color:#c98a5e; }
+.rv-run { cursor:pointer; } .rv-collapsed { color:var(--faint); font-size:11.5px; }
+.rv-run:hover .rv-collapsed { color:var(--ink); }
+.rv-run.open .rv-cmd { display:block; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; font:11.5px/1.6 ui-monospace,Menlo,monospace; color:var(--faint); }
+.rv-run.open .rv-cmd em { font-style:normal; color:#c98a5e; margin-right:8px; }
+.rv-md { max-height:none; margin-top:14px; font-size:12.5px; line-height:1.62;
+  padding-right:6px; }
+.rv-md h1 { font-size:14px; margin:0 0 10px; letter-spacing:-.1px; }
+.rv-md h2 { font-size:13px; margin:20px 0 8px; padding-bottom:6px;
+  border-bottom:1px solid var(--line,#262b36); }
+.rv-md h3 { font-size:12.5px; margin:16px 0 6px; color:#a9c4ea; }
+.rv-md h4, .rv-md h5, .rv-md h6 { font-size:12px; margin:13px 0 5px; }
+.rv-md p { margin:0 0 9px; }
+.rv-md ul, .rv-md ol { margin:0 0 10px; padding-left:18px; }
+.rv-md li { margin-bottom:4px; }
+.rv-md code { font:11.5px ui-monospace,Menlo,monospace; background:rgba(255,255,255,.07);
+  border-radius:4px; padding:1px 4px; }
+.rv-md pre { background:rgba(0,0,0,.28); border-radius:8px; padding:10px 12px; overflow:auto;
+  font:11.5px/1.55 ui-monospace,Menlo,monospace; color:var(--faint); margin:0 0 11px; }
+.rv-md pre code { background:none; padding:0; }
+.rv-md hr { border:0; border-top:1px solid var(--line,#262b36); margin:16px 0; }
+.rv-md b { font-weight:600; color:var(--ink); }
+.rv-find { border-top:1px solid var(--line,#262b36); padding:8px 0; font-size:12.5px; }
+.rv-find code { font-size:11px; color:var(--faint); margin-left:7px; }
+.rv-cmd { font:11.5px/1.5 ui-monospace,Menlo,monospace; color:var(--faint);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rv-card { border:1px solid var(--line,#262b36); border-radius:12px; padding:13px; margin-bottom:12px; }
+.rv-live { border-color:#2a4a7f; animation: rvbreathe 3.2s ease-in-out infinite; }
+@keyframes rvbreathe { 0%,100% { box-shadow:0 0 0 0 rgba(110,168,254,.10) }
+  50% { box-shadow:0 0 20px 2px rgba(110,168,254,.12) } }
+.rv-h { font-size:12.5px; font-weight:600; margin-bottom:8px; display:flex; gap:8px; align-items:center; }
+.rv-b { position:relative; padding-left:15px; margin-top:5px; font-size:13px; }
+.rv-b:before { content:""; position:absolute; left:3px; top:8px; width:4px; height:4px;
+  border-radius:99px; background:#6ea8fe; }
+.rv-pre { white-space:pre-wrap; background:rgba(0,0,0,.28); border-radius:8px; padding:10px;
+  font:12px ui-monospace,Menlo,monospace; margin:9px 0; max-height:200px; overflow:auto; }
+.rv-acts { display:flex; gap:8px; margin-top:10px; }
+.rv-sev { font-size:10px; padding:1px 7px; border-radius:99px; background:rgba(255,255,255,.07); }
+.rv-sev.s2 { background:#3a2f1a; color:#e0b252; } .rv-sev.s3 { background:#3a1d1c; color:#e0655f; }
 .resume { font-size: 11px; color: var(--faint); }
 .resume:hover { color: var(--ink); }
 .openin { display: inline-flex; align-items: center; gap: 5px; }
@@ -633,6 +1162,13 @@ function fileMenuItems(s, fp) {
     {sep: 1},
     {t: "Copy file", ic: mic(I_STACK), run: () => copyFilesOnly(s, [fp])},
     {t: "Copy path", ic: mic(I_PATH), run: async () => { if (await copyText(fp)) toast("Path copied"); }},
+    // a published artifact already has a live URL — no upload, no expiry
+    ...(meta?.pub_url ? [{sep: 1},
+      {t: "Copy published link", k: "⌘⇧L", ic: mic(I_LINK), run: async () => {
+        if (await copyText(meta.pub_url)) toast("Artifact link copied"); }},
+      {t: "Open published artifact", ic: mic(I_OPEN), run: () =>
+        api("/api/open_url", {url: meta.pub_url}).catch((e) => toast(e.message))},
+    ] : []),
   ];
 }
 
@@ -774,6 +1310,18 @@ const FILE_ICON = (name) => {
     return svg('<path d="M4.3 4 2.4 6l1.9 2M7.7 4l1.9 2-1.9 2"/>');
   return svg('<path d="M3 1.5h4l2.5 2.5V10.5H3z"/><path d="M7 1.5V4h2.5"/>');
 };
+let REVIEWS = [];                 // one entry per session being reviewed
+let _openW = null;                // which reviewer card is expanded
+const _openR = new Set();         // which individual reviews are expanded
+const rvFor = (p) => REVIEWS.find((w) => w.path === p) || null;
+const _fxDraft = {};              // unsaved instruction text, keyed by watch
+const _queued = new Set();       // asked for, not yet picked up by the tick
+let _askOpen = null;             // which card has the one-off composer open
+const rvBusy = () => REVIEWS.some((w) => w.busy);
+const REVIEWER_OF = {"codex":"claude-code", "claude-code":"codex"};
+const RVLABEL = {"claude-code":"Claude", "codex":"Codex"};
+const reviewerOf = (app) => REVIEWER_OF[app] || null;
+
 const GLYPHS = {
   "_fallback": '<svg viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="2.4"/></svg>',
   "pi": '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.5 4h7M4.3 4v5M8 4v4.2c0 .6.4.9 1 .7"/></svg>',
@@ -805,7 +1353,44 @@ const rel = (t) => {
 };
 
 let sessions = [], shares = [], stores = [], caps = {}, mode = "list", sel = 0, selPath = null, expanded = null, peekCache = {};
+/* Where you were last time. Reopening into the sessions list when you left the
+   app watching a review loses the thing you were actually following. */
+const VIEW_KEY = "shareit-review-view";
+function saveView() {
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(
+    {mode, openW: _openW, pane: _pane})); } catch {}
+}
+function restoreView() {
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem(VIEW_KEY) || "null"); } catch {}
+  if (!v || v.mode !== "reviews") return false;
+  mode = "reviews";
+  if (v.pane === "tx" || v.pane === "notes") _pane = v.pane;
+  if (v.openW && rvFor(v.openW)) _openW = v.openW;   // gone? open the list instead
+  return true;
+}
 let srcFilter = "all";
+// share-it's own agents (mood classifier, cross-model reviewer) write rollouts
+// like anything else. They are plumbing, not conversations — folded away behind
+// their own filter chip instead of drowning the list in identical titles.
+const SELF_MARKS = ["you are classifying, not assisting",
+                    "has been working in this repo. you are reviewing",
+                    "coding-assistant sessions. for each one",
+                    "reply with one json object and nothing else"];
+const isSelf = (s) => {
+  const t = (s.title || "").toLowerCase();
+  return SELF_MARKS.some((m) => t.includes(m));
+};
+// what deserves the top of the list: fresh, live, and substantial — not merely new
+function heat(s) {
+  const hrs = Math.max(0, (Date.now() / 1000 - (s.last_used || s.mtime || 0)) / 3600);
+  let h = 100 / (1 + hrs / 5);                       // halves every ~5 hours
+  const st = sessionState(s);
+  if (st === "working") h += 70;
+  else if (st === "done") h += 30;
+  h += Math.min(18, Math.log10(Math.max(1, s.size || 1)) * 2.6);
+  return h;
+}
 let _pinnedRecents = null;   // frozen recents order — stable while you use the palette
 let _scrollFilesFor = null;   // path whose file chips we should scroll to once they render
 function refreshPins() { _pinnedRecents = null; }   // next visible() recomputes
@@ -877,7 +1462,8 @@ function visible() {
     }
   });
   const base = sessions.filter((s) => !s.subagent &&
-    (srcFilter === "all" || s.app === srcFilter) &&
+    (srcFilter === "_self" ? isSelf(s) : !isSelf(s)) &&
+    (srcFilter === "all" || srcFilter === "_self" || s.app === srcFilter) &&
     !(s.size < 40000 && biggest[s.title] > s.size * 10) &&
     !(s.thread && (s.last_used || s.mtime) < newestByThread[s.thread]));
   base.forEach((s) => { s._contentOnly = false; });
@@ -888,8 +1474,13 @@ function visible() {
     const s = base.find((x) => x.path === h.path);
     if (s && !have.has(s.path)) { s._snippet = h.snippet; s._contentOnly = true; vis.push(s); have.add(s.path); }
   }
-  if (q.length) {  // title matches outrank content-only hits; both newest-first
+  if (q.length) {  // title matches outrank content hits; hot ones lead inside each
     vis.sort((a, b) => (a._contentOnly ? 1 : 0) - (b._contentOnly ? 1 : 0)
+      || heat(b) - heat(a));
+  } else {
+    // an agent mid-turn belongs at the top, above even pinned recents
+    const rank = (x) => ({working: 0, done: 1}[sessionState(x)] ?? 2);
+    vis.sort((a, b) => rank(a) - rank(b)
       || (b.last_used || b.mtime) - (a.last_used || a.mtime));
   }
   // recents pin from a FROZEN snapshot — acting on a row must NOT reorder the
@@ -898,6 +1489,12 @@ function visible() {
     if (_pinnedRecents === null) {
       try { _pinnedRecents = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]").slice(0, 2); }
       catch { _pinnedRecents = []; }
+      // a session you touched last week is not "recent" any more — let it fall
+      // back into the list and rank on its own heat
+      const warm = Date.now() / 1000 - 2 * 86400;
+      const byP = new Map(sessions.map((x) => [x.path, x]));
+      _pinnedRecents = _pinnedRecents.filter((pp) =>
+        (byP.get(pp)?.last_used || byP.get(pp)?.mtime || 0) >= warm);
     }
     const byPath = new Map(vis.map((x) => [x.path, x]));
     const recents = _pinnedRecents.map((p) => byPath.get(p)).filter(Boolean);
@@ -942,6 +1539,8 @@ function moveSel(doScroll) {
   }
 }
 function render() {
+  if (mode === "mood") return renderMood();
+  if (mode === "reviews") return renderReviews();
   mode === "list" ? renderList() : renderShares();
 }
 
@@ -985,6 +1584,53 @@ const I_BUBBLE = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" str
 const I_STACK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><rect x="5.2" y="5.2" width="8" height="8" rx="1.8"/><path d="M10.8 5.2V4.4a1.6 1.6 0 0 0-1.6-1.6H4.4a1.6 1.6 0 0 0-1.6 1.6v4.8a1.6 1.6 0 0 0 1.6 1.6h0.8"/></svg>';
 const I_LINK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6.7 9.3l2.6-2.6"/><path d="M5.9 6.9 4.5 8.3a2.62 2.62 0 1 0 3.7 3.7l1.4-1.4"/><path d="M10.1 9.1l1.4-1.4a2.62 2.62 0 1 0-3.7-3.7L6.4 5.4"/></svg>';
 const I_CHECK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-6.5"/></svg>';
+/* Three states worth seeing at a glance:
+   working  — the file changed seconds ago, an agent is mid-turn (amber, pulsing)
+   done     — it finished and you have not looked since (green, solid)
+   seen     — nothing                                                        */
+const SEEN_KEY = "shareit-seen";
+let _seen = {};
+let _seenSeeded = false;
+try { _seen = JSON.parse(localStorage.getItem(SEEN_KEY) || "{}"); } catch {}
+try { _seenSeeded = localStorage.getItem(SEEN_KEY + "-seeded") === "1"; } catch {}
+function seedSeen() {          // first run: everything that exists now is "known"
+  if (_seenSeeded || !sessions.length) return;
+  const now = Date.now() / 1000;
+  sessions.forEach((s) => { _seen[s.path] = Math.max(_seen[s.path] || 0,
+                                                     s.last_used || s.mtime || now); });
+  _seenSeeded = true;
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(_seen));
+        localStorage.setItem(SEEN_KEY + "-seeded", "1"); } catch {}
+}
+function markSeen(path, t) {
+  _seen[path] = Math.max(_seen[path] || 0, t || Date.now() / 1000);
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(_seen)); } catch {}
+}
+/* "working" is the file still being written. "done" is the narrow window just
+   after it stops — a turn that ended and you have not looked at yet. Anything
+   older is just history, and lighting all of it up green means nothing. */
+const WORKING_S = 90;        // written within 90s: the agent is mid-turn
+const DONE_S = 1800;         // ...and for 30 min after it stops, it is unread news
+function sessionState(s) {
+  if (!_seenSeeded) seedSeen();
+  const t = s.last_used || s.mtime || 0;
+  const age = Date.now() / 1000 - t;
+  if (age < WORKING_S) return "working";
+  if (age < DONE_S && t > (_seen[s.path] || 0)) return "done";
+  return "";
+}
+const ST_TIP = {working: "working right now",
+                done: "finished — you have not opened it since"};
+
+function reviewBtn(s) {
+  const rv = reviewerOf(s.app);
+  if (!rv) return "";
+  const w = rvFor(s.path), on = !!w, who = RVLABEL[rv];
+  return `<button class="rowicon rvbtn lens-btn${on ? " on" : ""}${on && w.busy ? " working" : ""}"
+    data-review="1" data-tip="${on ? `${who} is reviewing — open review` : `${who} reviews this session`}"
+    >${I_LENS}</button>`;
+}
+
 function accessoryHtml(s) {
   const st = s._share;
   const fresh = lastCopied === s.path;
@@ -992,6 +1638,7 @@ function accessoryHtml(s) {
     ? '<button class="rowicon" disabled>…</button>'
     : `<button class="rowicon${st && st.url ? " haslink" : ""}" data-share="1" data-tip="${st && st.url ? "Copy share link" : "Share link"}|⌘L">${I_LINK}</button>`;
   return `<span class="acc-icons">
+    ${reviewBtn(s)}
     <button class="rowicon" data-msg="1" data-tip="Send result as message|⌥⌘R">${I_BUBBLE}</button>
     ${link}
     <button class="rowicon${fresh ? " ok" : " primary"}" data-ctx="1" data-tip="Copy context|⏎">${fresh ? I_CHECK : I_STACK}</button>
@@ -1019,14 +1666,18 @@ function renderList() {
       ? '<div class="mhdr" style="padding:8px 12px 3px">message matches</div>' : ""}
     <div class="row${i === sel ? " sel" : ""}${expanded === s.path ? " exp" : ""}" role="listitem" data-i="${i}" data-path="${esc(s.path)}" data-app="${esc(s.app)}">
       <div class="row-line">
-        <span class="disc">›</span><span class="glyph${openTargetFor(s) ? " canopen" : ""}" ${openTargetFor(s)
-          ? `role="button" tabindex="0" data-resume="1" data-tip="Open in ${esc(openTargetFor(s))}|⌥⏎"`
-          : `data-tip="${esc(SRC_TIPS[s.app] || s.app)}"`}>${GLYPHS[s.app] || GLYPHS._fallback}</span>
+        <span class="disc">›</span><span class="glyph${openTargetFor(s) ? " canopen" : ""}${
+          sessionState(s) ? " st-" + sessionState(s) : ""}" ${openTargetFor(s)
+          ? `role="button" tabindex="0" data-resume="1" data-tip="${sessionState(s)
+              ? esc(ST_TIP[sessionState(s)]) + " · " : ""}Open in ${esc(openTargetFor(s))}|⌥⏎"`
+          : `data-tip="${sessionState(s) ? esc(ST_TIP[sessionState(s)]) + " · " : ""}${
+              esc(SRC_TIPS[s.app] || s.app)}"`}>${GLYPHS[s.app] || GLYPHS._fallback}</span>
         <span class="t">${hiText(s.title)}${s._snippet && $("#q").value.trim().length >= 2
           ? `<span class="snip">${esc(s._snippet).replace(/«/g, "<b>").replace(/»/g, "</b>")}</span>` : ""}</span>
         <span class="m">
           ${(s.n_primary ?? s.arts) ? `<button class="clip" data-files="1" tabindex="0" data-tip="${s.n_primary ?? s.arts} file${(s.n_primary ?? s.arts) > 1 ? "s" : ""} — click to view"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2H3.8A1 1 0 0 0 2.8 3v6a1 1 0 0 0 1 1h4.4a1 1 0 0 0 1-1V4.2z"/><path d="M7 2v2.2h2.2"/></svg>${s.n_primary ?? s.arts}</button>` : ""}
-          <span class="meta-idle">${!query && srcFilter === "all" && recentSet.has(s.path) && i < 2 ? '<span class="recent-tag">recent</span>' : ""}<span class="proj">${esc(s.project || "")}</span><span class="when">${rel(s.last_used || s.mtime)}</span></span>
+          <span class="meta-idle">${rvFor(s.path)
+            ? `<span class="rvdot lens${rvFor(s.path).busy ? " working" : ""}">${I_LENS}</span>` : ""}${!query && srcFilter === "all" && recentSet.has(s.path) && i < 2 ? '<span class="recent-tag">recent</span>' : ""}<span class="proj">${esc(s.project || "")}</span><span class="when">${rel(s.last_used || s.mtime)}</span></span>
           ${accessoryHtml(s)}
         </span>
       </div>
@@ -1037,18 +1688,22 @@ function renderList() {
         : `<div class="empty">No sessions match “${esc(query)}”<div class="esc-hint"><kbd>Esc</kbd> clear search</div></div>`)
       : '<div class="empty">No sessions found</div>');
   const counts = {};
-  sessions.filter((s) => !s.subagent).forEach((s) => counts[s.app] = (counts[s.app] || 0) + 1);
+  let nSelf = 0;
+  sessions.filter((s) => !s.subagent).forEach((s) =>
+    isSelf(s) ? nSelf++ : counts[s.app] = (counts[s.app] || 0) + 1);
   const footClass = {"claude-code": "c-claude", "cowork": "c-cowork", "codex": "c-codex"};
   const footName = {"claude-code": "claude"};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  const top = Object.entries(counts).filter(([, n]) => n > 0)
+  const top = Object.entries(counts)
+    .filter(([, n]) => n >= Math.max(3, total * 0.01))
     .sort(([, a], [, b]) => b - a).slice(0, 3);
-  const chips = [`<span class="srcf${srcFilter === "all" ? " on" : ""}" data-src="all" role="button" tabindex="0">All ${total}</span>`]
+  const chips = [`<span class="srcf srcf-app${srcFilter === "all" ? " on" : ""}" data-src="all" role="button" tabindex="0">All<b>${total}</b></span>`]
     .concat(top.map(([app, n]) =>
-      `<span class="srcf${srcFilter === app ? " on" : ""} ${footClass[app] || ""}" data-src="${esc(app)}" role="button" tabindex="0"><span class="dot"></span>${footName[app] || app} ${n}</span>`))
+      `<span class="srcf srcf-app${srcFilter === app ? " on" : ""} ${footClass[app] || ""}" data-src="${esc(app)}" role="button" tabindex="0"><i class="srcf-g">${GLYPHS[app] || GLYPHS._fallback}</i>${footName[app] || app}<b>${n}</b></span>`))
+    .concat(nSelf ? [`<span class="srcf srcf-app srcf-self${srcFilter === "_self" ? " on" : ""}" data-src="_self" role="button" tabindex="0" data-tip="share-it's own reviewer and mood agents — hidden from the list">⚙<b>${nSelf}</b></span>`] : [])
     .join("");
   const nvis = vis.length;
-  $("#foot").innerHTML = `${chips}<span class="grow"></span><span id="hint">${
+  $("#foot").innerHTML = `${navChips()}<span class="foot-sep"></span>${chips}<span class="grow"></span><span id="hint">${
     !vis.length && query ? `<kbd>Esc</kbd> clear`
     : query ? `${nvis} result${nvis === 1 ? "" : "s"}${IS_NATIVE ? ` · <kbd>⏎</kbd> Copy context` : ""}`
     : IS_NATIVE ? `<kbd>→</kbd> Preview · <kbd>⏎</kbd> Copy context · <kbd>⌘K</kbd> Actions` : `click a row to preview · hover for actions`}</span>`;
@@ -1069,12 +1724,1073 @@ function renderList() {
   scrollToFilesIfWanted();
 }
 
+/* --- mood: how the sessions actually felt, judged by a model --- */
+let MOOD = null, _moodPoll = null, _moodDrawn = false, _moodOpen = false, _moodChip = null;
+const MOODS = [["calm", "calm", "🙂"], ["mixed", "mixed", "😐"],
+               ["frustrated", "frustrated", "😤"], ["angry", "had enough", "🤬"]];
+const MOOD_ICON = Object.fromEntries(MOODS.map(([k, , e]) => [k, e]));
+const AGENT_NAME = {"claude-code": "Claude", "codex": "Codex", "cursor": "Cursor",
+  "copilot": "Copilot", "cline": "Cline", "roo": "Roo", "goose": "Goose",
+  "opencode": "OpenCode", "continue": "Continue", "pi": "Pi", "cowork": "Cowork"};
+const clean = (t) => String(t || "")
+  .replace(/^\s*\[(Image|Pasted text|Request)[^\]]*\]\s*/i, "").trim();
+
+function navChips() {
+  const waiting = REVIEWS.filter((w) => w.pending && !w.pending.sent_at).length;
+  return `<span class="srcf${mode === "list" ? " on" : ""}" data-src="all"
+      role="button" tabindex="0">sessions</span>
+    <span class="srcf rvchip${mode === "reviews" ? " on" : ""}${waiting ? " has" : ""}${
+      rvBusy() ? " live" : ""}" data-rvopen="1" role="button" tabindex="0"><span class="dot"></span>reviews${
+      waiting ? " " + waiting : ""}</span>
+    <span class="srcf${mode === "mood" ? " on" : ""}" data-moodopen="1"
+      role="button" tabindex="0">mood</span>`;
+}
+
+function moodChip() {
+  return `<span class="srcf${mode === "mood" ? " on" : ""}" data-moodopen="1"
+    role="button" tabindex="0">mood</span>`;
+}
+
+let _moodErr = null;
+async function loadMood() {
+  try { MOOD = await api("/api/sentiment"); _moodErr = null; }
+  catch (e) { _moodErr = String(e.message || e); }
+  if (mode === "mood") render();
+}
+
+/* Today's number is worthless if nothing re-reads today's sessions. On opening
+   the tab, quietly read a batch if anything has changed and the last read was
+   a while ago. One call, not a loop. */
+let _autoReadAt = 0;
+function autoRead() {
+  if (!MOOD || MOOD.running || !MOOD.pending) return;
+  if (Date.now() - _autoReadAt < 3 * 60 * 1000) return;
+  _autoReadAt = Date.now();
+  api("/api/sentiment/refresh", {batches: 3})
+    .then(() => { clearInterval(_moodPoll);
+      _moodPoll = setInterval(async () => {
+        await loadMood();
+        if (mode !== "mood" || !(MOOD && MOOD.running)) {
+          clearInterval(_moodPoll); _moodPoll = null;
+        }
+      }, 4000); })
+    .catch(() => {});
+}
+
+function renderMood() {
+  const m = MOOD;
+  $("#foot").innerHTML = `${navChips()}<span class="grow"></span>
+    <span id="hint">${m ? `rolling 24h · ${m.sessions_judged} session${
+      m.sessions_judged === 1 ? "" : "s"} read` : ""}</span>`;
+  $("#foot").querySelectorAll("[data-src],[data-rvopen],[data-moodopen]").forEach((el) =>
+    el.addEventListener("click", () => {
+      if (el.dataset.src) { mode = "list"; saveView(); }
+      else if (el.dataset.rvopen) { mode = "reviews"; saveView(); }
+      render();
+    }));
+
+  if (!m) {
+    $("#list").innerHTML = _moodErr
+      ? `<div class="md-wrap"><div class="md-blocker"><b>Can't reach share-it.</b>
+         <span>${esc(_moodErr)}</span>
+         <button class="md-read" data-mood="retry">try again</button></div></div>`
+      : `<div class="md-wrap"><div class="rv-skel">${"<i></i>".repeat(3)}</div></div>`;
+    $("#list").querySelectorAll("[data-mood]").forEach((el) =>
+      el.addEventListener("click", () => loadMood()));
+    return;
+  }
+
+  const agents = (m.agents || []).filter((a) => a.n);
+  const named = (a) => AGENT_NAME[a.app] || a.app;
+  const top = [...agents].sort((x, y) => y.frustration - x.frustration)[0];
+  const rest = agents.filter((a) => a !== top);
+
+  // Counts of sessions, not an invented 0-100 score. One cell per session,
+  // oldest left — the same shape as a contribution graph, which needs no
+  // explaining. Colour is the only encoding, and the key names each colour.
+  const firstDraw = !_moodDrawn; _moodDrawn = true;   // animate on entry, not on poll
+  // One number, said once. Everything else is evidence for it, and none of it
+  // asks you to do arithmetic.
+  // A mood is not an average. Dividing rough messages by the day's total let
+  // a calm afternoon cancel a furious morning, which is why 56 fights out of
+  // 263 messages once read as "Blissful". Rough messages now cost outright:
+  // the score decays against how much friction there was, not what fraction
+  // of the day it occupied. Recent friction weighs most, so the number falls
+  // hard when it goes wrong and climbs back as the bad stretch ages out.
+  const WEIGHT = {calm: 0.35, mixed: 0.5, frustrated: 0.85, angry: 1.25};
+  const HALF_LIFE_H = 8;    // friction is worth half as much eight hours later
+  const DECAY_K = 20;       // ~10 angry messages just now ≈ 54; ~40 ≈ 13
+  // A run carries per-local-day message counts. Scoped to today we use only
+  // today's share of it — a session you opened today may hold a fortnight of
+  // history, and counting all of it is how five messages read as 176.
+  const TODAY = (() => { const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${
+      String(d.getDate()).padStart(2, "0")}`; })();
+  const todayMsgs = (r) => ((r.days || {})[TODAY]) || 0;
+  // One score per calendar day, from the per-day message buckets. There is
+  // deliberately no recency decay any more: today's runs carry a file mtime of
+  // "now" so they decayed by ~1, while a past day's runs decayed against that
+  // day's end — which quietly discounted history and made every today look
+  // worse than every yesterday. Same formula both sides, or the comparison
+  // means nothing.
+  const tally = (runs, dayKey) => {
+    let pen = 0, n = 0;
+    (runs || []).forEach((r) => {
+      const msgs = dayKey ? ((r.days || {})[dayKey] || 0) : (r.msgs || 0);
+      if (!msgs) return;
+      n += msgs;
+      // only this day's share of a session's friction
+      const share = dayKey ? Math.min(1, msgs / Math.max(1, r.msgs || 1)) : 1;
+      // a rough message in a "calm" session is still a rough message - the old
+      // table scored it zero, so those vanished entirely
+      pen += (r.rough_msgs || 0) * share * (WEIGHT[r.mood] ?? 0.6);
+    });
+    return {pen, n};
+  };
+  const dayScore = (runs, dayKey) => {
+    const {pen, n} = tally(runs, dayKey);
+    return n ? Math.max(0, Math.min(100, Math.round(100 * Math.exp(-pen / DECAY_K)))) : null;
+  };
+  const friction = (runs) => dayScore(runs, live ? TODAY : null);
+  // The day turns over at YOUR midnight, not 24 hours after whenever you
+  // last looked. A run counts as today only if you actually sent something
+  // today, which the per-day buckets answer exactly.
+  const MIDNIGHT = new Date().setHours(0, 0, 0, 0) / 1000;
+  const isNow = (r) => todayMsgs(r) > 0;
+  const allRuns = agents.flatMap((a) => a.runs || []);
+  const dayRuns = allRuns.filter(isNow);
+  const live = dayRuns.length >= 1;
+  const scopeRuns = live ? dayRuns : allRuns;
+  const scopeLabel = live ? "today" : `last ${m.window_days} days`;
+  const score = friction(scopeRuns);
+  const msgsOf = (r) => (live ? todayMsgs(r) : (r.msgs || 0));
+  const roughOf = (r) => (live
+    ? (r.rough_msgs || 0) * Math.min(1, todayMsgs(r) / Math.max(1, r.msgs || 1))
+    : (r.rough_msgs || 0));
+  const totals = scopeRuns.reduce((t, r) => ({
+    msgs: t.msgs + msgsOf(r), rough: t.rough + roughOf(r)}), {msgs: 0, rough: 0});
+  totals.rough = Math.round(totals.rough);
+  const scoped = agents.map((a) => {
+    const runs = (a.runs || []).filter((r) => !live || isNow(r));
+    return {...a, runs, msgs: runs.reduce((t, r) => t + msgsOf(r), 0),
+            rough_msgs: Math.round(runs.reduce((t, r) => t + roughOf(r), 0))};
+  }).filter((a) => a.runs.length);
+  const worst = [...scoped].sort((x, y) => (y.rough_msgs || 0) - (x.rough_msgs || 0))[0];
+  const TIERS = [[93, "Flowing", "😌", "s-calm"], [76, "Good run", "🙂", "s-calm"],
+                 [55, "Grinding", "😐", "s-mixed"], [30, "Rough", "😤", "s-frustrated"],
+                 [0, "Brutal", "🤬", "s-angry"]];
+  const tier = TIERS.find(([floor]) => (score ?? 100) >= floor) || TIERS[TIERS.length - 1];
+
+  if (!agents.length) {
+    $("#list").innerHTML = `<div class="md-wrap md-anim"><div class="md-empty">
+      <img class="md-art" src="/static/mood-empty.svg" alt="">
+      <h1 class="md-hero">How did your week go?</h1>
+      <p class="md-sub">Nothing read yet. ${m.pending == null ? "Your" : m.pending}
+        sessions from the last ${m.window_days} days are waiting — one model call per ten.</p>
+      <button class="md-read" data-mood="read">read my sessions</button></div></div>`;
+    bindMood();
+    return;
+  }
+
+  // the receipts: one thing that went right, one that did not, side by side
+  // recent and punchy beats merely worst — and never the same session twice
+  const chipFor = (q, i) => {
+    const open = _moodChip === (q.key || i);
+    return `<div class="md-chip ${q.kind} ${open ? "open" : ""}">
+      <button class="md-chip-b" data-mood="chip" data-k="${esc(q.key || String(i))}">
+        <span class="md-chip-i">${q.kind === "good" ? "✅" : MOOD_ICON[q.mood] || "😤"}</span>
+        <span class="md-chip-t">${esc(clean(q.quote).length > 74
+          ? clean(q.quote).slice(0, 72).trimEnd() + "…" : clean(q.quote))}</span>
+        ${open ? "" : `<span class="md-chip-w">${(q.tags || []).length
+          ? (q.tags || []).slice(0, 3).map((t) =>
+              `<b class="md-tag ${q.kind}">${esc(t)}</b>`).join("")
+          : esc(q.why || "")}<em>${esc(q.agent)}</em></span>`}
+      </button>
+      ${open ? `<div class="md-chip-x">
+        ${(q.tags || []).length ? `<div class="md-tags">${(q.tags || [])
+          .map((t) => `<b class="md-tag ${q.kind}">${esc(t)}</b>`).join("")}</div>` : ""}
+        <p>${esc(q.why || "no reason recorded")}</p>
+        <div class="md-chip-meta">${esc(q.agent)}${q.title
+          ? " · " + esc(clean(q.title).slice(0, 44)) : ""}${q.msgs ? ` · ${q.msgs} messages` : ""}${
+          q.mtime ? " · " + esc(ago(new Date(q.mtime * 1000).toISOString())) : ""}
+          <button class="md-open" data-mood="jump" data-title="${esc(clean(q.title || ""))}"
+            title="open this session">open ›</button></div>
+      </div>` : ""}
+    </div>`;
+  };
+  // A quote belongs to the day it was SAID. Filtering on the session file's
+  // mtime kept a line from Aug 19 on screen because a background pass had
+  // touched the file today.
+  const recent = (arr) => {
+    const r = arr.filter((q) => todayMsgs(q) > 0);
+    if (r.length) return r;
+    const byFile = arr.filter((q) => (q.mtime || 0) >= MIDNIGHT && !(q.days));
+    return byFile.length ? byFile : arr;
+  };
+  const winList = recent(agents.flatMap((a) => (a.wins || [])
+    .map((q) => ({...q, agent: named(a)}))))
+    .sort((x, y) => (y.mtime || 0) - (x.mtime || 0));
+  const badList = recent(agents.flatMap((a) => (a.quotes || [])
+    .map((q) => ({...q, agent: named(a)}))).filter((q) => (q.frustration || 0) >= 40))
+    .sort((x, y) => (y.mtime || 0) - (x.mtime || 0));
+
+  // Empty buckets are gaps, not zeros — a quiet hour is not a bad hour.
+  const DAY = 86400000, HR = 3600000;
+  const STEP = live ? 2 * HR : DAY;
+  const NBUCK = live ? 12 : m.window_days;
+  // buckets end on the current hour when live, on today when not
+  const END = live ? Math.ceil(Date.now() / (2 * HR)) * 2 * HR
+                   : new Date().setHours(0, 0, 0, 0) + DAY;
+  const buckets = Array.from({length: NBUCK}, () => ({msgs: 0, rough: 0}));
+  agents.forEach((a) => (a.runs || []).forEach((r) => {
+    if (!r.mtime) return;
+    const i = NBUCK - 1 - Math.floor((END - r.mtime * 1000) / STEP);
+    if (i >= 0 && i < NBUCK) {
+      buckets[i].msgs += r.msgs || 0; buckets[i].rough += r.rough_msgs || 0;
+    }
+  }));
+  const days = buckets.map((b) => b.msgs
+    ? {score: Math.max(0, 100 - Math.round((b.rough / b.msgs) * 100)), msgs: b.msgs} : null);
+  const bucketLabel = (k) => {
+    const end = new Date(END - (NBUCK - 1 - k) * STEP);
+    return live
+      ? new Date(end - STEP).toLocaleTimeString([], {hour: "numeric"}).replace(" ", "")
+        + "–" + end.toLocaleTimeString([], {hour: "numeric"}).replace(" ", "")
+      : new Date(end - DAY).toLocaleDateString([], {weekday: "short", day: "numeric", month: "short"});
+  };
+  const trend = `<div class="md-trend">
+    <div class="md-trend-h">${live ? "last 24h" : m.window_days + " days"}<span class="grow"></span>${
+      (() => { const seen = days.filter(Boolean);
+        if (seen.length < 2) return live ? "one stretch so far" : "not enough days yet";
+        const half = Math.ceil(seen.length / 2);
+        const avg = (xs) => Math.round(xs.reduce((t, d) => t + d.score, 0) / xs.length);
+        const delta = avg(seen.slice(half)) - avg(seen.slice(0, half));
+        return delta === 0 ? "holding steady"
+          : `${delta > 0 ? "▲" : "▼"} ${Math.abs(delta)} vs earlier`; })()}</div>
+    <div class="md-spark" data-spark>${days.map((d, i) => {
+      const dayOf = bucketLabel;
+      if (!d) return `<i class="gap" data-d="${esc(dayOf(i))}" data-t="quiet"></i>`;
+      const t = TIERS.find(([f]) => d.score >= f) || TIERS[TIERS.length - 1];
+      return `<i class="${t[3]}" style="height:${Math.max(9, d.score)}%"
+        data-d="${esc(dayOf(i))}" data-t="${d.score} · ${d.msgs} msg${
+          d.msgs === 1 ? "" : "s"}"></i>`;
+    }).join("")}</div><div class="md-tip" hidden></div></div>`;
+
+  // today against the fortnight behind it — the one comparison the data supports
+  // Every earlier day scored the same way as today, then averaged. Bucketing
+  // by the session FILE's mtime used to drop a whole day's messages out of the
+  // baseline whenever a background pass touched that file today.
+  const priorDays = [...new Set(allRuns.flatMap((r) => Object.keys(r.days || {})))]
+    .filter((k) => k !== TODAY).sort();
+  const usual = (() => {
+    const scores = priorDays.map((k) => dayScore(allRuns, k)).filter((x) => x != null);
+    return scores.length
+      ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+  })();
+  const versus = (() => {
+    if (usual == null || score == null) return "";
+    const d = score - usual;
+    const bar = (v, lab, on) => {
+      const t = TIERS.find(([f]) => v >= f) || TIERS[TIERS.length - 1];
+      return `<div class="md-vs-r${on ? " now" : ""}">
+        <span class="md-vs-l">${lab}</span>
+        <span class="md-mini-bar"><i class="${on ? t[3] : "s-past"}-f"
+          style="width:${Math.max(4, v)}%"></i></span>
+        <span class="md-vs-n${on ? " " + t[3] + "-t" : ""}">${v}</span></div>`;
+    };
+    return `<div class="md-vs">
+      <div class="md-trend-h">${scopeLabel}<span class="grow"></span>${d === 0
+        ? "same as usual" : `${d > 0 ? "▲" : "▼"} ${Math.abs(d)} vs usual`}</div>
+      ${bar(score, "now", true)}${bar(usual, "usual", false)}</div>`;
+  })();
+
+  const rows = scoped.map((a) => {
+    const sc = friction(a.runs) ?? 100;
+    const t = TIERS.find(([f]) => sc >= f) || TIERS[TIERS.length - 1];
+    // 100 out of four messages is not the same claim as 100 out of eighty —
+    // show the sample beside the score instead of hiding it in a tooltip
+    const thin = a.msgs < 10;
+    return `<div class="md-mini${thin ? " thin" : ""}" title="${sc} out of 100 — ${
+      a.rough_msgs || 0} of ${a.msgs} messages were a fight${
+      thin ? " (too few to read much into)" : ""}">
+      <span class="rvg">${GLYPHS[a.app] || GLYPHS._fallback}</span>
+      <span class="md-mini-n">${esc(named(a))}</span>
+      <span class="md-mini-c">${a.msgs} msg${a.msgs === 1 ? "" : "s"}</span>
+      <span class="md-mini-s ${t[3]}-t">${sc}</span>
+      <span class="md-mini-bar"><i class="${t[3]}-f"
+        style="width:${Math.max(4, sc)}%"></i></span>
+    </div>`;
+  }).join("");
+
+  $("#list").innerHTML = `<div class="md-wrap${firstDraw ? " md-anim" : ""}">
+    ${m.error ? `<div class="md-blocker warn"><b>Part of that run failed.</b>
+      <span>${esc(m.error)}</span></div>` : ""}
+    <div class="md-top"><span class="md-eyebrow">${scopeLabel}${
+      totals.msgs ? ` · ${totals.msgs} msg${totals.msgs === 1 ? "" : "s"}` : ""}</span>
+      <span class="grow"></span>
+      ${m.running ? `<span class="md-busy">reading… ${m.sessions_judged} done${
+          m.pending ? `, ${m.pending} to go` : ""}</span>`
+        : `<button class="md-read" data-mood="read">read ${
+            m.pending == null ? "20" : Math.min(20, m.pending)} more</button>`}
+    </div>
+
+    <div class="md-stage">
+      <div class="md-left">
+        <div class="md-score ${tier[3]}">
+          <span class="md-face-xl">${tier[2]}</span>
+          <span class="md-score-n">${score}</span>
+          <span class="md-score-w">${tier[1]}</span>
+          <span class="md-score-c">${totals.msgs
+          ? `${totals.rough} of ${totals.msgs} messages were a fight${
+              live ? "" : " · " + scopeLabel}`
+          : "nothing yet " + scopeLabel}</span>
+        </div>
+        <div class="md-panel"><div class="md-rows">${rows}</div>${
+          live ? versus : (days.filter(Boolean).length >= 2 ? trend : "")}</div>
+      </div>
+      <div class="md-receipts">${(() => {
+        const now = Date.now();
+        const rank = (q, base) => base
+          - ((now - (q.mtime || 0) * 1000) / 3600000) * 6;   // fades 6 an hour
+        const pool = [
+          ...winList.map((q) => ({...q, kind: "good", r: rank(q, 62 + Math.min(20, (q.msgs || 0) / 4))})),
+          ...badList.map((q) => ({...q, kind: "bad", r: rank(q, q.frustration || 50)})),
+        ].filter((q) => q.quote);
+        // two rough, one good — balanced but honest about which dominates
+        const seen = new Set(), picks = [];
+        const take = (kind, max) => {
+          for (const q of pool.sort((x, y) => y.r - x.r)) {
+            if (q.kind !== kind) continue;
+            const id = (q.title || "") + "|" + q.quote.slice(0, 24);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            picks.push({...q, key: id});
+            if (picks.filter((p) => p.kind === kind).length >= max) return;
+          }
+        };
+        take("bad", 2);
+        take("good", 1);
+        take("bad", 3);                              // fill the column, rough-heavy
+        if (picks.length < 4) take("good", 2);
+        picks.sort((x, y) => y.r - x.r);
+        if (!picks.length)
+          return `<div class="md-none">read a few sessions and the moments show up here</div>`;
+        const good = picks.filter((q) => q.kind === "good").length;
+        return picks.map(chipFor).join("") + (good ? "" :
+          `<div class="md-none quiet">no good moments recorded ${
+            live ? "today" : "yet"} — every quote above is friction</div>`);
+      })()}</div>
+    </div>
+
+
+
+  </div>`;
+  bindMood();
+  bindSpark();
+  fitReceipts();
+  return;
+}
+
+// Quotes are whatever length they are, so no fixed padding makes four of them
+// fit at every window size. Drop the weakest until the column stops scrolling.
+function fitReceipts() {
+  const col = $("#list").querySelector(".md-receipts");
+  if (!col) return;
+  for (let guard = 0; guard < 6; guard++) {
+    const chips = col.querySelectorAll(".md-chip");
+    if (chips.length <= 2 || col.scrollHeight <= col.clientHeight) break;
+    if (chips[chips.length - 1].classList.contains("open")) break;  // never the one being read
+    chips[chips.length - 1].remove();
+  }
+}
+
+function bindSpark() {
+  const spark = $("#list").querySelector("[data-spark]");
+  const tip = $("#list").querySelector(".md-tip");
+  if (!spark || !tip) return;
+  spark.addEventListener("mouseleave", () => { tip.hidden = true; });
+  spark.querySelectorAll("i").forEach((bar) => {
+    bar.addEventListener("mouseenter", () => {
+      tip.innerHTML = `<b>${bar.dataset.t}</b>${bar.dataset.d}`;
+      tip.hidden = false;
+      const b = bar.getBoundingClientRect(), s = spark.getBoundingClientRect();
+      const x = b.left - s.left + b.width / 2;
+      tip.style.left = Math.max(0, Math.min(x - tip.offsetWidth / 2,
+                                            s.width - tip.offsetWidth)) + "px";
+    });
+  });
+}
+
+function bindMood() {
+  $("#list").querySelectorAll("[data-mood]").forEach((el) =>
+    el.addEventListener("click", () => {
+      const k = el.dataset.mood;
+      if (k === "expand") { _moodOpen = !_moodOpen; _moodDrawn = true; return render(); }
+      if (k === "retry") return loadMood();
+      if (k === "chip") {                    // reveal in place, do not navigate
+        const id = el.dataset.k;
+        _moodChip = _moodChip === id ? null : id;
+        _moodDrawn = true;
+        return render();
+      }
+      if (k === "jump") {                    // the quote is a way back in
+        const t = (el.dataset.title || "").slice(0, 40);
+        if (t) { $("#q").value = t; mode = "list"; saveView(); render(); }
+        return;
+      }
+      el.disabled = true; el.textContent = "reading…";
+      api("/api/sentiment/refresh", {batches: 2})
+        .then((x) => { toast(x.message); clearInterval(_moodPoll);
+          _moodPoll = setInterval(async () => {          // stop when the run does
+            await loadMood();
+            if (mode !== "mood" || !(MOOD && MOOD.running)) {
+              clearInterval(_moodPoll); _moodPoll = null;
+            }
+          }, 4000); })
+        .catch((e) => toast(String(e.message || e)));
+    }));
+}
+
+function reviewChip() {
+  const waiting = REVIEWS.filter((w) => w.pending && !w.pending.sent_at).length;
+  return `<span class="srcf rvchip${mode === "reviews" ? " on" : ""}${waiting ? " has" : ""}${
+    rvBusy() ? " live" : ""}" data-rvopen="1" role="button" tabindex="0"><span class="dot"></span>reviews${
+      waiting ? " " + waiting : ""}</span>`;
+}
+
+/* Reviews tab: what the other model has said, and anything waiting on you. */
+/* The reviewers panel. Many agents can be reviewing at once, so the top level
+   is a list of them — one compact card each, expanded on click. */
+function renderReviews() {
+  if (_rvErr && !REVIEWS.length) {
+    $("#list").innerHTML = `<div class="rv-wrap"><div class="rv-blank">
+      <b>Cannot reach share-it</b>
+      <span>The panel is not getting status back. If the app restarted, reopen it —
+      this page is holding a token that no longer works.</span></div></div>`;
+    rvFoot();
+    return;
+  }
+  if (!REVIEWS.length && !_rvLoaded) {
+    $("#list").innerHTML = `<div class="rv-wrap">${
+      `<div class="rvc"><div class="rv-skel" style="padding:16px">${"<i></i>".repeat(2)}</div></div>`
+        .repeat(2)}</div>`;
+    rvFoot();
+    return;
+  }
+  if (!REVIEWS.length) {
+    $("#list").innerHTML = `<div class="rv-wrap"><div class="rv-blank">
+      <b>No reviewers running</b>
+      <span>Hover a session and click the other model's mark. That model reads the
+      work as it happens and speaks up only when something looks wrong.</span></div></div>`;
+    rvFoot();
+    return;
+  }
+  const ordered = orderedWatches();
+  const need = REVIEWS.filter((w) => w.pending && !w.pending.sent_at);
+  const banner = need.length ? `<div class="rv-alert" data-rv="jump">
+      <span class="rv-alert-d"></span>
+      <b>${need.length === 1
+        ? `${esc(need[0].reviewer_label)} has something for your ${esc(need[0].title || "session")}`
+        : `${need.length} reviewers have something for you`}</b>
+      <span class="rv-alert-t">${esc(need[0].pending.headline
+        || (need[0].pending.summary || [])[0] || "")}</span>
+      <span class="grow"></span><span class="rv-alert-go">show ›</span>
+    </div>` : "";
+  bindReviewDelegates();
+  $("#list").innerHTML = `<div class="rv-wrap">${banner}${ordered.map(rvCard).join("")}</div>`;
+  const pane = document.getElementById("rv-pane");
+  if (pane) bindRuns(pane);
+  if (_openW) {
+    if (_pane === "tx" && _tx[_openW] === undefined) loadTx();
+    if (_pane === "notes" && _notes[_openW] === undefined) loadNotes();
+  }
+  rvFoot();
+  bindFocusBox();
+  bindAskBox();
+  // delegated once, not re-bound per render: a poll landing between mousedown
+  // and mouseup replaced the node and silently orphaned its listener
+}
+
+let _rvDelegated = false;
+function bindReviewDelegates() {
+  if (_rvDelegated) return;
+  _rvDelegated = true;
+  const list = $("#list");
+  list.addEventListener("mouseenter", () => { _listHover = true; });
+  list.addEventListener("mouseleave", () => { _listHover = false; render(); });
+  list.addEventListener("click", (ev) => {
+    if (mode !== "reviews") return;
+    const act = ev.target.closest("[data-rv]");
+    if (act && list.contains(act)) { ev.stopPropagation(); return onReviewAction(act); }
+    const card = ev.target.closest("[data-wopen]");
+    if (card && list.contains(card)) return openWatch(card.dataset.wopen);
+  });
+  list.addEventListener("keydown", (ev) => {
+    if (mode !== "reviews" || (ev.key !== "Enter" && ev.key !== " ")) return;
+    const card = ev.target.closest("[data-wopen]");
+    if (card) { ev.preventDefault(); openWatch(card.dataset.wopen); }
+  });
+}
+
+function openWatch(p) {
+  _openIdx = _openW === p ? -1 : _order.indexOf(p);   // hold its slot while open
+  _openW = _openW === p ? null : p;
+  saveView();
+  render();
+  if (!_openW) return;
+  if (_pane === "tx") loadTx(); else loadNotes();
+  // expanding the last card would otherwise leave its body below the fold
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const list = $("#list"), card = list && list.querySelector(".rvc.open");
+    if (!card) return;
+    const wrap = card.offsetParent || list;
+    list.scrollTo({top: Math.max(0, card.offsetTop - (wrap === list ? 0 : wrap.offsetTop) - 8),
+                   behavior: "smooth"});
+  }));
+}
+
+/* Rank by what you would look at first — but never reorder while the user is
+   in the middle of something. A card that moves under the cursor is worse than
+   a card in a stale position, so the order is frozen while a card is open, the
+   pointer is inside the list, or a text box has focus. */
+let _order = [], _listHover = false, _openIdx = -1;
+function orderedWatches() {
+  const tier = (w) => w.paused ? 3
+    : (w.pending && !w.pending.sent_at) ? 0
+    : (w.busy || _queued.has(w.path)) ? 1 : 2;
+  const when = (w) => (w.history[0] || {}).at || w.added || "";
+  const fresh = [...REVIEWS].sort((a, b) =>
+    tier(a) - tier(b) || (when(b) > when(a) ? 1 : when(b) < when(a) ? -1 : 0))
+    .map((w) => w.path);
+  // An open card is not "interacting" — it can stay open for an hour, and
+  // freezing on it meant the list never re-sorted at all. Freeze only on
+  // transient contact, and pin the open card so it alone never moves.
+  const busyHands = _askOpen || _fxFocused || _listHover;
+  if (!busyHands || !_order.length) {
+    _order = fresh;
+  } else {
+    const live = new Set(REVIEWS.map((w) => w.path));
+    const kept = _order.filter((p) => live.has(p));          // drop stopped ones
+    for (const p of fresh) if (!kept.includes(p)) kept.push(p);   // new ones last
+    _order = kept;
+  }
+  if (_openW && _openIdx >= 0 && _order.includes(_openW)) {
+    const rest = _order.filter((p) => p !== _openW);
+    const at = Math.min(_openIdx, rest.length);
+    _order = [...rest.slice(0, at), _openW, ...rest.slice(at)];
+  }
+  return _order.map((p) => rvFor(p)).filter(Boolean);
+}
+
+function rvFoot() {
+  $("#foot").innerHTML = `${navChips()}<span class="grow"></span><span id="hint">${
+      esc(_openW ? (rvFor(_openW) || {}).cwd || "" : "")}</span>`;
+}
+
+/* One reviewer. Collapsed it is two lines: who is reviewing what, and the last
+   thing they said. That is what makes a list of them readable. */
+function rvCard(w) {
+  const open = _openW === w.path;
+  const who = w.reviewer_label || "Reviewer", peer = w.peer_label || "";
+  const top = w.history[0];
+  const unsent = w.pending && !(w.pending.sent_at);
+  const state = w.paused ? `<em class="rvc-paused">paused</em>`
+    : w.busy ? `<em class="rvc-run">reading the work</em>`
+    : _queued.has(w.path) ? `<em class="rvc-run">starting…</em>`
+    : w.cooling ? `<em>waiting out the gap</em>`
+    : unsent ? `<em class="rvc-wait">has something for you</em>`
+    : (() => { const n = Math.max(0, (w.every || 4) - (w.new || 0));
+        return `${n} turn${n === 1 ? "" : "s"} to next check`; })();
+  void 0;
+  const lede = top ? (top.headline || (top.summary || [])[0] || "")
+                   : `nothing said yet · watching every ${w.every || 4} turns`;
+
+  const gl = (k) => `<span class="rvg">${GLYPHS[k] || GLYPHS._fallback}</span>`;
+  const head = `<div class="rvc-head">
+      <span class="rv-live-dot${w.paused ? " off"
+        : (w.busy || _queued.has(w.path)) ? " busy" : ""}${
+        unsent && !w.paused ? " wait" : ""}"></span>
+      <span class="rvc-ttl">${esc(w.title || "untitled session")}</span>
+      <span class="grow"></span>
+      ${w.paused || w.busy || _queued.has(w.path) ? "" : (_askOpen === w.path
+        ? `<span class="rvc-ask"><input id="rv-ask" spellcheck="false" data-p="${esc(w.path)}"
+             placeholder="anything specific? — enter to run, esc to cancel"></span>`
+        : `<button class="rvc-now" data-rv="ask" data-p="${esc(w.path)}">review now</button>`)}
+      <span class="rvc-state">${state}</span>
+      <span class="rvc-caret${open ? " open" : ""}">›</span>
+    </div>
+    <div class="rvc-by">${gl(w.reviewer === "claude" ? "claude-code" : "codex")}${esc(who)}
+      <span class="rvc-ar">reviewing</span>${gl(w.source === "codex" ? "codex" : "claude-code")}${esc(peer)}</div>
+    ${open ? "" : `<div class="rvc-lede${
+      top && (top.should_interrupt ?? top.review_needed) && !top.sent_at ? " hot" : ""}">${
+      ""}<span>${esc(lede)}</span>${top ? `<span class="rvc-t">${esc(ago(top.at))}</span>` : ""}</div>`}
+    ${!open && top && top.prompt && ((top.should_interrupt ?? top.review_needed)
+        || (top.severity || 0) >= 2) ? `
+      <div class="rvc-cta${(top.should_interrupt ?? top.review_needed) ? "" : " calm"}">
+        <button class="rv-go${top.sent_at ? " done" : ""}" data-rv="send"
+          data-p="${esc(w.path)}" data-i="0"><i>${I_SEND}</i>${top.sent_at
+            ? "open again" : `send to ${esc(peer)}`}</button>
+        <button class="rv-ic" data-rv="copy" data-p="${esc(w.path)}" data-i="0"
+          data-tip="Copy it — counts as handled">${I_COPY}</button>
+        <button class="rv-ic no" data-rv="reject" data-p="${esc(w.path)}" data-i="0"
+          data-tip="Not worth it — stop carrying this forward">${I_NO}</button>
+        ${top.rejected_at ? `<span class="rvi-quiet">declined</span>`
+          : top.sent_at ? `<span class="rvi-done"><span class="rvi-tick">${I_TICK}</span>handled</span>` : ""}
+      </div>` : ""}`;
+
+  if (!open) return `<section class="rvc${w.paused ? " paused" : ""}" role="button"
+    tabindex="0" aria-expanded="false" data-wopen="${esc(w.path)}">${head}</section>`;
+
+  const draft = _fxDraft[w.path];
+  const fset = ((draft ?? w.focus) || "").trim();
+  const focus = _fxOpen || fset
+    ? `<div class="rv-inst open"><input id="rv-focus" spellcheck="false" data-p="${esc(w.path)}"
+         value="${esc(draft ?? w.focus ?? "")}"
+         placeholder="standing instruction — extra emphasis on top of the normal review">
+       <span class="rv-saved" id="rv-saved"></span></div>`
+    : `<button class="rv-inst" data-rv="inst">+ standing instruction</button>`;
+
+  const body = `<div class="rvc-body">
+      <div class="rvc-acts">
+${w.reviewer_cmd ? `<button class="rv-stop" data-rv="open" data-p="${esc(w.path)}">open ${esc(who)}</button>` : ""}
+        <button class="rv-stop${w.paused ? " go" : ""}" data-rv="${w.paused ? "resume" : "stop"}"
+          data-p="${esc(w.path)}">${w.paused ? "resume" : "pause"}</button>
+        <span class="grow"></span>
+        <span class="rvc-stats"${w.stats.ignored ? ` title="${w.stats.ignored} replies could not be parsed"` : ""}>${
+          w.stats.checks || 0} check${w.stats.checks === 1 ? "" : "s"}${
+          w.stats.raised ? ` · ${w.stats.raised} worth telling ${esc(peer)}` : ""}</span>
+      </div>
+      ${focus}
+      ${w.history.length ? w.history.map((h, i) => rvItem(w, h, i)).join("")
+        : `<div class="rv-blank"><span>Nothing yet. ${esc(who)} wakes after
+           ${w.every || 4} new turns from ${esc(peer)}.</span></div>`}
+      <div class="rv-tabs">
+        <span class="rv-tab${_pane === "tx" ? " on" : ""}" data-rv="pane-tx">${esc(who)}'s transcript</span>
+        <span class="rv-tab${_pane === "notes" ? " on" : ""}" data-rv="pane-notes">review file</span>
+        <span class="grow"></span>
+        <span class="rv-dim" style="font-size:11px">${esc((w.file || "").split("/").pop() || "")}</span>
+      </div>
+      <div id="rv-pane" class="${w.busy && _pane === "tx" ? "live" : ""}">${
+        _pane === "tx" ? renderTx(w) : renderNotes(w)}</div>
+    </div>`;
+  return `<section class="rvc open${w.paused ? " paused" : ""}"><div role="button"
+    tabindex="0" aria-expanded="true" data-wopen="${esc(w.path)}">${head}</div>${body}</section>`;
+}
+
+/* One review inside a card: headline always, detail on demand. The one that
+   wants to interrupt you opens itself. */
+function rvItem(w, h, i) {
+  const key = w.path + "|" + h.at;
+  const hot = h.should_interrupt ?? h.review_needed;          // wants you now
+  const ask = !!h.prompt && (hot || (h.severity || 0) >= 2);  // has something to send
+  const open = _openR.has(key) || (i === 0 && hot && !_openR.has("!" + key));
+  const bl = (x) => (Array.isArray(x) ? x : [x]).filter(Boolean)
+    .map((b) => `<li>${esc(b)}</li>`).join("");
+  const head = h.headline || (h.summary || [])[0] || "(no summary)";
+  const sev = SEV[Math.max(0, Math.min(3, h.severity || 0))];
+  const rest = h.headline ? (h.summary || []) : (h.summary || []).slice(1);
+  return `<div class="rvi${open ? " open" : ""}${hot ? " hot" : ""}">
+    <div class="rvi-head" data-rv="tog" data-k="${esc(key)}" data-open="${open ? 1 : 0}">
+      <span class="rvi-t">${esc(hhmm(h.at))}</span>
+      <span class="rvi-title">${esc(head)}</span>
+      ${hot && sev.label ? `<span class="rvi-sev s${h.severity}">${sev.label}</span>` : ""}
+      ${h.sent_at ? `<span class="rvi-done"><span class="rvi-tick">${I_TICK}</span>sent</span>`
+        : hot ? `<span class="rvi-tag">needs you</span>`
+        : ask ? `<span class="rvi-tag calm">worth sending</span>`
+        : `<span class="rvi-quiet">info</span>`}
+      <span class="rvi-caret${open ? " open" : ""}">›</span>
+    </div>
+    ${open ? `<div class="rvi-body">
+      ${ask ? rvCTA(w, h, i, hot) : `<div class="rvi-noact">
+        <b>Nothing to do.</b> ${esc(w.reviewer_label || "The reviewer")} recorded this and
+        carried on — it is here so you can see what it looked at.
+        <button class="rvi-link" data-rv="copy" data-p="${esc(w.path)}" data-i="${i}">copy anyway</button></div>`}
+      ${rest.length ? `<button class="rvi-more${_openR.has(key + "#n") ? " on" : ""}"
+          data-rv="tog" data-k="${esc(key + "#n")}" data-open="${_openR.has(key + "#n") ? 1 : 0}">${_openR.has(key + "#n")
+            ? "hide notes" : `${rest.length} more note${rest.length === 1 ? "" : "s"}`}</button>
+        ${_openR.has(key + "#n") ? `<ul class="rv-bul">${bl(rest)}</ul>` : ""}` : ""}
+      </div>` : ""}
+  </div>`;
+}
+
+/* The one place in the panel that asks something of you. It should look like
+   it, and nothing else should. */
+// the scale runs 0..3 upward; nobody should have to guess that from a numeral
+const SEV = [{label: ""}, {label: "note"}, {label: "fix eventually"}, {label: "fix now"}];
+function ago(iso) {
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "";
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+const I_SEND = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2 7.2 8.9M14 2l-4.4 12-2.4-5.1L2 6.5z"/></svg>';
+const I_COPY = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><rect x="5.4" y="5.4" width="7.6" height="7.6" rx="1.7"/><path d="M10.6 5.4V4.2a1.6 1.6 0 0 0-1.6-1.6H4.6A1.6 1.6 0 0 0 3 4.2v4.4a1.6 1.6 0 0 0 1.6 1.6h1"/></svg>';
+const I_NO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></svg>';
+const I_LENS = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><g class="lens"><circle cx="7" cy="7" r="4.1"/><path d="M10.1 10.1 13.4 13.4"/></g></svg>';
+const I_TICK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-6.5"/></svg>';
+function rvCTA(w, h, i, hot) {
+  const peer = w.peer_label || "the agent";
+  const sent = !!h.sent_at, st = h.send_state, pk = w.path + "|" + h.at + "#p";
+  return `<div class="rvi-cta${sent ? " sent" : ""}${
+    !sent && hot ? (h.severity >= 3 ? " sev3" : " urgent") : " calm"}">
+    <div class="rvi-cta-h">${sent
+      ? `<span class="rvi-tick">${I_TICK}</span>${
+          st === "pasted" ? `Pasted into ${esc(peer)}`
+          : st === "opened" ? `Handed to ${esc(peer)}`
+          : `Copied for ${esc(peer)}`}`
+      : `<span class="rvi-sev s${h.severity} big">${
+          SEV[Math.max(0, Math.min(3, h.severity || 0))].label || "note"}</span>Worth telling ${
+          esc(peer)}${hot ? " — it will not go on its own" : ", when you get a moment"}`}</div>
+    <div class="rvi-cta-b">${String(h.prompt || "").split("\n")
+      .filter((l) => l.trim()).map((l) => `<p>${esc(l)}</p>`).join("")}</div>
+    <div class="rv-acts">
+      <button class="rv-go${sent ? " done" : ""}" data-rv="send" data-p="${esc(w.path)}" data-i="${i}"
+        data-tip="${sent ? `Open ${esc(peer)} again` : `Copy and open ${esc(peer)}`}">
+        <i>${I_SEND}</i>${sent ? "open again" : `send to ${esc(peer)}`}</button>
+      <button class="rv-ic" data-rv="copy" data-p="${esc(w.path)}" data-i="${i}"
+        data-tip="Copy it — counts as handled">${I_COPY}</button>
+      <button class="rv-ic no" data-rv="reject" data-p="${esc(w.path)}" data-i="${i}"
+        data-tip="Not worth it — stop carrying this forward">${I_NO}</button>
+      <span class="grow"></span>
+    </div>
+    <div class="rvi-src">reasoning and how to confirm it: <code>${
+      esc((h.file || w.file || "").split("/").pop() || "the review file")}</code></div></div>`;
+}
+
+function onReviewAction(el) {
+  const k = el.dataset.rv, path = el.dataset.p || _openW;
+  if (k === "tog") {
+    const key = el.dataset.k;
+    const shown = el.dataset.open === "1";   // what is on screen, not what is in the set
+    if (shown) { _openR.delete(key); _openR.add("!" + key); }
+    else { _openR.add(key); _openR.delete("!" + key); }
+    return render();
+  }
+  if (k === "jump") {
+    const first = REVIEWS.find((x) => x.pending && !x.pending.sent_at);
+    if (first) { _openW = first.path; render(); loadTx();
+      requestAnimationFrame(() => { const c = $("#list").querySelector(".rvc.open");
+        if (c) c.scrollIntoView({block: "start", behavior: "smooth"}); }); }
+    return;
+  }
+  if (k === "stop" || k === "resume") {
+    return api(k === "stop" ? "/api/review/disable" : "/api/review/enable", {path})
+      .then((x) => { toast(x.message); return pollReview(); })
+      .then(() => render()).catch((e) => toast(String(e.message || e)));
+  }
+  if (k === "open") return openReviewer(path);
+  if (k === "inst") { _fxOpen = true; return render(); }
+  if (k === "ask") { _askOpen = path; render(); return; }
+  if (k === "now") {
+    const ask = (el.dataset.ask || "").trim();
+    _askOpen = null;
+    _queued.add(path); _queuedAt[path] = Date.now(); render();   // tick is up to 5s away
+    return api("/api/review/now", {path, ask})
+      .then((x) => { if (!x.ok) { _queued.delete(path); delete _queuedAt[path]; }
+                     toast(x.message); return pollReview(); })
+      .catch((e) => { _queued.delete(path); delete _queuedAt[path]; render();
+                      toast(String(e.message || e)); });
+  }
+  if (k === "pane-tx") { _pane = "tx"; saveView(); render(); return loadTx(); }
+  if (k === "pane-notes") { _pane = "notes"; saveView(); render(); return loadNotes(); }
+  if (k === "copy") return api("/api/review/copy", {path, i: +el.dataset.i})
+    .then((x) => toast(x.message)).catch(() => {});
+  if (k === "reject") {
+    return api("/api/review/reject", {path, i: +el.dataset.i})
+      .then((x) => { toast(x.message); return pollReview(); })
+      .then(() => render()).catch((e) => toast(String(e.message || e)));
+  }
+  if (k === "dismiss") return resolveReview("dismiss", path).then(() => render());
+  if (k === "send") {
+    el.disabled = true; el.textContent = "sending…";
+    return api("/api/review/send", {path, i: +el.dataset.i})
+      .then((x) => { toast(x.message); pollReview(); })
+      .catch((e) => { toast(String(e.message || e)); el.disabled = false; });
+  }
+}
+
+function bindAskBox() {
+  const box = document.getElementById("rv-ask");
+  if (!box) return;
+  box.focus();
+  box.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { ev.preventDefault(); _askOpen = null; return render(); }
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    onReviewAction({dataset: {rv: "now", p: box.dataset.p, ask: box.value}});
+  });
+  box.addEventListener("blur", () => {          // clicking away cancels, quietly
+    setTimeout(() => { if (_askOpen && !document.getElementById("rv-ask")) return;
+                       if (document.activeElement !== box) { _askOpen = null; render(); } }, 120);
+  });
+}
+
+function bindFocusBox() {
+  const fx = document.getElementById("rv-focus");
+  if (!fx) return;
+  if (_fxFocused || (_fxOpen && !fx.value)) {
+    fx.focus();
+    const n = fx.value.length;            // a re-render must not send the caret home
+    try { fx.setSelectionRange(_fxCaret ?? n, _fxCaret ?? n); } catch {}
+  }
+  fx.addEventListener("focus", () => { _fxFocused = true; });
+  fx.addEventListener("blur", () => { _fxFocused = false; _fxCaret = null; });
+  fx.addEventListener("input", () => {
+    _fxDraft[fx.dataset.p] = fx.value;    // survives any render that lands mid-typing
+    _fxCaret = fx.selectionStart;
+    clearTimeout(_fxTimer);
+    const tag = document.getElementById("rv-saved");
+    if (tag) tag.textContent = "…";
+    _fxTimer = setTimeout(async () => {
+      const path = fx.dataset.p, text = fx.value;
+      try { await api("/api/review/focus", {path, text});
+            const cur = rvFor(path); if (cur) cur.focus = text;
+            if (_fxDraft[path] === text) delete _fxDraft[path];
+            const t2 = document.getElementById("rv-saved");
+            if (t2) { t2.textContent = "saved"; setTimeout(() => {
+              const t3 = document.getElementById("rv-saved"); if (t3) t3.textContent = ""; }, 1400); }
+      } catch {}
+    }, 600);
+  });
+}
+
+async function toggleReview(s) {
+  const on = !!rvFor(s.path);
+  try {
+    const r = await api(on ? "/api/review/disable" : "/api/review/enable", {path: s.path});
+    if (r?.message) toast(r.message);
+  } catch (err) { return toast(String(err.message || err)); }
+  await pollReview(); render();
+}
+
+let _pane = "tx", _tx = {}, _notes = {}, _txOpenRuns = new Set(), _fxTimer = null, _fxDirty = null, _fxFocused = false, _fxOpen = false, _fxCaret = null;
+function txText(t) {
+  const raw = String(t || "").trim();
+  if (!raw.startsWith("{") || !raw.includes('"summary"')) return null;
+  let v = null;
+  try { v = JSON.parse(raw); } catch { return null; }
+  if (!v || !Array.isArray(v.summary)) return null;
+  return `<div class="tx-verdict">${v.headline ? `<b>${esc(v.headline)}</b>` : ""}
+    <ul class="rv-bul">${v.summary.map((b) => `<li>${esc(b)}</li>`).join("")}</ul></div>`;
+}
+function renderTx(w) {
+  // undefined means the fetch has not come back; [] means it came back empty.
+  // conflating them left the skeleton shimmering forever on a quiet reviewer.
+  const tx = _tx[w.path];
+  if (!tx) return `<div class="rv-skel">${"<i></i>".repeat(4)}</div>`;
+  if (!tx.length) return `<div class="rv-empty">${w.busy
+    ? "reading — the first tool calls land here"
+    : `nothing logged yet · ${esc(w.reviewer_label || "the reviewer")} writes here as it works`}</div>`;
+  // consecutive tool calls collapse to one dim line — the reasoning is the
+  // signal; the greps in between are not, until you ask for them
+  const rows = [];
+  for (let i = 0; i < tx.length; i++) {
+    if (tx[i].role !== "tool") { rows.push({m: tx[i]}); continue; }
+    const run = [];
+    while (i < tx.length && tx[i].role === "tool") run.push(tx[i++]);
+    i--;
+    rows.push({run});
+  }
+  return `<div class="rv-stream">${rows.map((r, ri) => {
+    if (r.m) {
+      const m = r.m;
+      const pretty = m.role === "user" ? null : txText(m.text);
+      return `<div class="msg ${m.role === "user" ? "u" : "a"}">
+        <i>${m.role === "user" ? "context" : esc(RVLABEL[w.reviewer] || "reviewer")}</i>
+        <span>${pretty || esc(m.text)}</span></div>`;
+    }
+    const n = r.run.length, open = _txOpenRuns.has(ri);
+    if (!open) return `<div class="msg t rv-run" data-run="${ri}">
+      <i></i><span class="rv-collapsed">${n} tool call${n > 1 ? "s" : ""}</span></div>`;
+    return `<div class="msg t rv-run open" data-run="${ri}"><i></i><span>
+      ${r.run.map((t) => `<span class="rv-cmd"><em>${esc(t.tool)}</em>${esc(t.text)}</span>`)
+        .join("")}</span></div>`;
+  }).join("")}</div>`;
+}
+function renderNotes(w) {
+  const text = _notes[w.path] || "";
+  if (!text) return `<div class="rv-empty">nothing written yet — findings land
+    here as they accumulate</div>`;
+  const cut = text.startsWith("\u2026");      // backend marks a tail slice
+  return `<div class="rv-md">${cut ? `<div class="rv-trunc">showing the end of
+    <code>${esc((w.file || "").split("/").pop())}</code> — open the file for the
+    earlier sections</div>` : ""}${renderMd(cut ? text.slice(1) : text)}</div>`;
+}
+
+/* Small markdown renderer — the review file is written as markdown, so showing
+   it raw was showing the reader the source instead of the document. Escapes
+   first, then formats, so nothing in the file can inject markup. */
+function mdInline(t) {
+  return t.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`)
+          .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+          .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<i>$2</i>")
+          .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+}
+// stored UTC, shown local — the panel is read next to a wall clock
+function hhmm(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso).slice(11, 16)
+    : d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false});
+}
+const BLOCK = /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|```|---|\|)/;
+function renderMd(src) {
+  const L = esc(src).split("\n"), out = [];
+  let i = 0, list = null;
+  const shut = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  while (i < L.length) {
+    const ln = L[i];
+    if (/^\s*```/.test(ln)) {                       // fenced code
+      shut(); const buf = []; i++;
+      while (i < L.length && !/^\s*```/.test(L[i])) buf.push(L[i++]);
+      i++; out.push(`<pre>${buf.join("\n")}</pre>`); continue;
+    }
+    const h = ln.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { shut(); const n = h[1].length;
+      out.push(`<h${n}>${mdInline(h[2])}</h${n}>`); i++; continue; }
+    if (/^\s*(---|\*\*\*|___)\s*$/.test(ln)) { shut(); out.push("<hr>"); i++; continue; }
+    const ul = ln.match(/^\s*[-*+]\s+(.*)$/), ol = ln.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (ul || ol) {
+      const kind = ul ? "ul" : "ol";
+      if (list !== kind) { shut(); out.push(`<${kind}>`); list = kind; }
+      const buf = [(ul || ol)[1]]; i++;
+      while (i < L.length && L[i].trim() && !BLOCK.test(L[i])) buf.push(L[i++].trim());
+      out.push(`<li>${mdInline(buf.join(" "))}</li>`); continue;
+    }
+    if (!ln.trim()) { shut(); i++; continue; }
+    shut();
+    const buf = [ln]; i++;                          // paragraph runs to a blank line
+    while (i < L.length && L[i].trim() && !BLOCK.test(L[i])) buf.push(L[i++]);
+    out.push(`<p>${mdInline(buf.join(" "))}</p>`);
+  }
+  shut();
+  return out.join("");
+}
+async function loadNotes() {
+  const w = rvFor(_openW);
+  if (!w) return;
+  try { const r = await api("/api/review/notes?path=" + encodeURIComponent(w.path));
+        _notes[w.path] = r.text || ""; }
+  catch { _notes[w.path] = ""; }
+  const el = document.getElementById("rv-pane");
+  if (el && _pane === "notes" && _openW === w.path) el.innerHTML = renderNotes(w);
+}
+
+function bindRuns(root) {
+  root.querySelectorAll("[data-run]").forEach((el) => el.addEventListener("click", () => {
+    const k = +el.dataset.run;
+    _txOpenRuns.has(k) ? _txOpenRuns.delete(k) : _txOpenRuns.add(k);
+    const pane = document.getElementById("rv-pane");
+    if (pane) { pane.innerHTML = renderTx(rvFor(_openW)); bindRuns(pane); }
+  }));
+}
+
+async function loadTx() {
+  const w = rvFor(_openW);
+  if (!w) return;
+  try { const r = await api("/api/review/transcript?path=" + encodeURIComponent(w.path));
+        _tx[w.path] = r.messages || []; }
+  catch { _tx[w.path] = []; }
+  const el = document.getElementById("rv-pane");
+  if (el && _pane === "tx" && _openW === w.path) {
+    const stuck = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.innerHTML = renderTx(rvFor(w.path) || w); bindRuns(el);
+    if (stuck) el.scrollTop = el.scrollHeight;   // follow only if already at the end
+  }
+}
+
+async function openReviewer(path) {
+  try {
+    const r = await api("/api/review/open", {path: path || _openW});
+    toast(r.launched ? "Opening the reviewer's session…" : "Copied the resume command");
+    if (!r.launched && r.command) navigator.clipboard?.writeText(r.command);
+  } catch (err) { toast(String(err.message || err)); }
+}
+
+async function resolveReview(action, path) {
+  try { const r = await api("/api/review/resolve", {path: path || _openW, action});
+        if (r?.message) toast(r.message); }
+  catch (err) { return toast(String(err.message || err)); }
+  await pollReview(); render();
+}
+
+const _rvSeen = new Set();
+/* a fingerprint of everything the panel draws, so a re-render happens exactly
+   when something moved — not every 2.5s, and not never */
+const rvSig = (ws) => ws.map((w) => [w.path, w.busy, w.new, w.stats.checks,
+  (w.pending || {}).at, (w.history[0] || {}).at,
+  (w.history[0] || {}).send_state].join(":")).join("|");
+let _rvSig = "";
+async function pollReview() {
+  try {
+    const r = await api("/api/review/status");
+    if (!r || !Array.isArray(r.watches)) return;
+    const sig = rvSig(r.watches) + "|" + [..._queued].sort().join(","),
+          changed = sig !== _rvSig;
+    _rvSig = sig;
+    REVIEWS = r.watches;
+    const now = Date.now();
+    for (const w of REVIEWS) {
+      if (!_queued.has(w.path)) continue;
+      // the tick picked it up, or it never will (paused, gone, or wedged)
+      if (w.busy || w.paused || now - (_queuedAt[w.path] || 0) > 45000) {
+        _queued.delete(w.path);
+        delete _queuedAt[w.path];
+      }
+    }
+    for (const w of REVIEWS) {
+      const at = (w.pending || {}).at;
+      if (at && !_rvSeen.has(at)) {
+        _rvSeen.add(at);
+        toast(`${w.reviewer_label} wants a word about ${w.title || "a session"}`);
+      }
+    }
+    if (_fxFocused && mode === "reviews") return;   // never yank a live text box
+    if (changed) render();
+    if (mode === "reviews" && _openW && _pane === "tx"
+        && (rvFor(_openW) || {}).busy) loadTx();     // stream while it works
+    _rvErr = false;
+    _rvLoaded = true;
+  } catch (e) {
+    _rvErr = true;
+    if (mode === "reviews") render();      // never show "nothing yet" for "cannot ask"
+  }
+}
+let _rvErr = false, _rvLoaded = false;
+const _queuedAt = {};            // when each queue request was made
+let _viewRestored = false;
+setInterval(pollReview, 2500);
+pollReview().then(() => {
+  if (_viewRestored) return;
+  _viewRestored = true;
+  if (restoreView()) {
+    render();
+    // the mood tab has its own fetch; restoring into it without this left the
+    // panel on a skeleton forever
+    if (mode === "mood") loadMood();
+    if (_openW) { if (_pane === "tx") loadTx(); else loadNotes(); }
+  }
+});
+
 /* one delegated listener — survives every re-render, no stale handlers */
 function sessionAt(ev) {
   const row = ev.target.closest(".row[data-path]");
   return row ? sessions.find((s) => s.path === row.dataset.path) : null;
 }
+$("#foot").addEventListener("click", (ev) => {
+  if (ev.target.closest("[data-moodopen]")) {
+    mode = "mood"; _moodDrawn = false; saveView(); render();
+    loadMood().then(autoRead);
+    return;
+  }
+  if (ev.target.closest("[data-rvopen]")) { mode = "reviews"; saveView(); render(); }
+  else if (mode === "reviews" && ev.target.closest("[data-src]")) { mode = "list"; saveView(); render(); }
+});
 $("#list").addEventListener("click", (ev) => {
+  if (mode === "reviews") return;
   if (mode !== "list") return sharesClick(ev);
   const s = sessionAt(ev);
   if (!s) return;
@@ -1085,8 +2801,16 @@ $("#list").addEventListener("click", (ev) => {
   if (filesBtn) {   // amber count pill -> expand + jump to files (never collapse)
     hideTip();
     _scrollFilesFor = s.path;
-    if (expanded !== s.path) { _wantScroll = true; toggle(s); }
+    if (expanded !== s.path) { _wantScroll = true; markSeen(s.path); toggle(s); }
     else scrollToFilesIfWanted();
+    return;
+  }
+  // a watched session opens its panel; only an unwatched one starts a review.
+  // stopping lives inside the panel, where you can see what you'd be throwing away.
+  if (t.closest("[data-review]")) {
+    hideTip();
+    if (rvFor(s.path)) { _openW = s.path; mode = "reviews"; saveView(); render(); }
+    else toggleReview(s);
     return;
   }
   const msgIcon = t.closest("[data-msg]");
@@ -1612,6 +3336,14 @@ $("#btn-shares").addEventListener("click", async () => {
 });
 
 document.addEventListener("keydown", (e) => {
+  // any other editable field owns its own keystrokes — without this the
+  // catch-all below yanks focus to the search box on every character typed
+  const tgt = e.target;
+  if (tgt && tgt !== $("#q") &&
+      (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) {
+    if (e.key === "Escape") { tgt.blur(); }
+    return;
+  }
   if (menu) {  // menu is the topmost layer
     const sub = $("#submenu");
     if (sub && menu.sub) {
