@@ -33,6 +33,9 @@ and [eight more](#works-with) — into one fast, local search. Find any chat, th
 off in a keystroke: as context for another agent, a hosted link for a teammate, or the
 finished files themselves.
 
+It also watches the work while it happens: a [second model reviewing](#a-second-model-watching-the-work)
+your live sessions, and a [read on how the day is actually going](#how-the-day-actually-went).
+
 ## Quickstart
 
 1. [Download the DMG](https://github.com/FlowAILab/share-it/releases/latest/download/Share-It.dmg) and drag **Share-It** into **Applications**.
@@ -59,6 +62,40 @@ finished files themselves.
 > **Why not just `/export`?** Claude's export ships the rendered scrollback — no tool
 > output, images reduced to `[Image #N]`. Share-It reads the raw session, so the
 > receiving agent gets the real work.
+
+## A second model, watching the work
+
+Point Share-It at a live session and the *other* model reviews it as it runs — Codex
+reads your Claude sessions, Claude reads your Codex ones. It looks every 5 agent turns,
+never more often than every 5 minutes, and keeps its own notes between checks.
+
+- 🔍 **Watch any session** — from the **Reviews** tab. The reviewer gets its own thread
+  and its own memory of what it has already raised, so it argues with the work, not
+  with itself.
+- 🚨 **Only "fix it now" interrupts** — severity runs 0–3. A **3** means the next real
+  step is unsafe until it is fixed; only a 3 earns a banner and a sound. A **2** is
+  "fix eventually" — recorded and carried forward, never a notification.
+- 🧾 **Nothing gets re-discovered, nothing gets dropped** — every check receives the
+  still-open list and must either settle each item with evidence or leave it open. It
+  cannot quietly re-file the same finding an hour later, and it cannot forget the one
+  you never got around to.
+- ✉️ **Act on it** — copy a finding, or send it straight into the session under review
+  as a message that agent will read mid-task.
+
+## How the day actually went
+
+One number for your day, computed from **your** messages — not the agent's.
+
+- 😤 **A single score** — your messages classified by a small model (Haiku 4.5), then
+  scored so friction costs outright instead of being averaged away. One bad stretch
+  shows up; a calm afternoon does not cancel it.
+- 📅 **Resets at your midnight** — a real local calendar day, from transcript
+  timestamps. Agent-written transcripts and machine-injected turns (hook feedback,
+  a reviewer interrupting you) are excluded — you did not type them.
+- 💬 **The receipts** — the messages behind the number, today's first, each labelled
+  with what went wrong. Click one for the reason, or jump to the session.
+- 📈 **Versus usual** — today against the fortnight behind it, scored the same way, so
+  the comparison means something.
 
 ## Nice extras
 
@@ -98,6 +135,10 @@ New client? It's one small file in [`adapters.py`](adapters.py) — PRs welcome.
 - **Local by default** — nothing leaves your Mac until you hit **Share link**. Copy
   context and Send result stay on-device, and clipboard writes are host-only (they never
   ride Universal Clipboard to your other devices).
+- **Reviews and mood use your own CLIs** — both shell out to the `claude` and `codex`
+  you already have installed, under your own account and your own limits. No key is
+  asked for, no transcript is sent anywhere Share-It chose. Neither feature runs until
+  you turn it on.
 - **Never used for training** — your sessions stay yours, on your own storage.
 - **Scrubbed** — transcript text is always checked for common secret patterns; hosted
   links additionally strip absolute paths and your username.
