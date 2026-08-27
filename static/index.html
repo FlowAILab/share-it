@@ -1918,20 +1918,21 @@ function renderMood() {
       </div>` : ""}
     </div>`;
   };
-  // A quote belongs to the day it was SAID. Filtering on the session file's
-  // mtime kept a line from Aug 19 on screen because a background pass had
-  // touched the file today.
-  const recent = (arr) => {
-    const r = arr.filter((q) => todayMsgs(q) > 0);
-    if (r.length) return r;
-    const byFile = arr.filter((q) => (q.mtime || 0) >= MIDNIGHT && !(q.days));
-    return byFile.length ? byFile : arr;
-  };
-  const winList = recent(agents.flatMap((a) => (a.wins || [])
-    .map((q) => ({...q, agent: named(a)}))))
+  // A quote belongs to the day it was SAID. When the panel is scoped to today
+  // it must NEVER borrow another day's moment to look full: falling back to
+  // "any quote at all" is how four-day-old Codex lines appeared under a day
+  // that had no Codex activity in it. An empty column is the honest answer.
+  const recent = (arr) => (live ? arr.filter((q) => todayMsgs(q) > 0) : arr);
+  const tagged = (key) => agents.flatMap((a) =>
+    (a[key] || []).map((q) => ({...q, agent: named(a)})));
+  const winList = recent(tagged("wins"))
     .sort((x, y) => (y.mtime || 0) - (x.mtime || 0));
-  const badList = recent(agents.flatMap((a) => (a.quotes || [])
-    .map((q) => ({...q, agent: named(a)}))).filter((q) => (q.frustration || 0) >= 40))
+  // The >=40 bar keeps chips genuinely rough. On a calm day it empties the
+  // column, and the old code filled it from other days — so it now relaxes
+  // WITHIN today rather than reaching outside it.
+  const badToday = recent(tagged("quotes"));
+  const strong = badToday.filter((q) => (q.frustration || 0) >= 40);
+  const badList = (strong.length ? strong : badToday)
     .sort((x, y) => (y.mtime || 0) - (x.mtime || 0));
 
   // Empty buckets are gaps, not zeros — a quiet hour is not a bad hour.
@@ -2074,7 +2075,10 @@ function renderMood() {
         if (picks.length < 4) take("good", 2);
         picks.sort((x, y) => y.r - x.r);
         if (!picks.length)
-          return `<div class="md-none">read a few sessions and the moments show up here</div>`;
+          return `<div class="md-none">${live
+            ? `nothing notable yet today — ${totals.msgs} message${
+                totals.msgs === 1 ? "" : "s"} in, none worth quoting`
+            : "read a few sessions and the moments show up here"}</div>`;
         const good = picks.filter((q) => q.kind === "good").length;
         return picks.map(chipFor).join("") + (good ? "" :
           `<div class="md-none quiet">no good moments recorded ${
