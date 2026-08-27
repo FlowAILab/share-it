@@ -26,6 +26,11 @@
   <img src="docs/screenshots/file-menu.png" width="49%" alt="Files are first-class — open, Quick Look, reveal in Finder, copy path, right from the palette">
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/reviews.png" width="49%" alt="Reviews — Codex reviewing a Claude session and Claude reviewing a Codex one, with a finding ready to send">
+  <img src="docs/screenshots/mood.png" width="49%" alt="Mood — one score for the day from your own messages, with the quotes behind it">
+</p>
+
 ---
 
 Share-It indexes every **AI agent session** on your Mac — Claude Code, Codex, Cursor,
@@ -131,6 +136,10 @@ never more often than every 5 minutes, and keeps its own notes between checks.
 - ✉️ **Act on it** — copy a finding, or send it straight into the session under review
   as a message that agent will read mid-task.
 
+<p align="center">
+  <img src="docs/screenshots/reviews.png" width="680" alt="Two reviewers running: Codex reads a Claude session and raises a severity-3 finding with a send button; Claude reads a Codex session and records a lower-severity note">
+</p>
+
 ## How the day actually went
 
 One number for your day, computed from **your** messages — not the agent's.
@@ -145,6 +154,10 @@ One number for your day, computed from **your** messages — not the agent's.
   with what went wrong. Click one for the reason, or jump to the session.
 - 📈 **Versus usual** — today against the fortnight behind it, scored the same way, so
   the comparison means something.
+
+<p align="center">
+  <img src="docs/screenshots/mood.png" width="680" alt="The mood tab: a single score for today, per-agent scores with their message counts, today against the usual, and the quotes behind the number">
+</p>
 
 ## Nice extras
 

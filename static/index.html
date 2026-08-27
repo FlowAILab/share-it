@@ -1363,8 +1363,11 @@ function saveView() {
 function restoreView() {
   let v = null;
   try { v = JSON.parse(localStorage.getItem(VIEW_KEY) || "null"); } catch {}
-  if (!v || v.mode !== "reviews") return false;
-  mode = "reviews";
+  // reopen on whichever tab you left, not just reviews — mood was saved by
+  // saveView() all along and then silently ignored on the way back in
+  if (!v || (v.mode !== "reviews" && v.mode !== "mood")) return false;
+  mode = v.mode;
+  if (mode === "mood") return true;
   if (v.pane === "tx" || v.pane === "notes") _pane = v.pane;
   if (v.openW && rvFor(v.openW)) _openW = v.openW;   // gone? open the list instead
   return true;
