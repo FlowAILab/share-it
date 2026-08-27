@@ -36,13 +36,62 @@ finished files themselves.
 It also watches the work while it happens: a [second model reviewing](#a-second-model-watching-the-work)
 your live sessions, and a [read on how the day is actually going](#how-the-day-actually-went).
 
-## Quickstart
+## Install
 
-1. [Download the DMG](https://github.com/FlowAILab/share-it/releases/latest/download/Share-It.dmg) and drag **Share-It** into **Applications**.
-2. Open it once (right-click → Open the first time — not yet notarized).
+**Requires** macOS 13+. Nothing else — Python is bundled in the DMG.
+
+1. [Download the DMG](https://github.com/FlowAILab/share-it/releases/latest/download/Share-It.dmg)
+   and drag **Share-It** into **Applications**.
+2. **First launch: right-click the app → Open → Open.** Double-clicking will not
+   work. See [Gatekeeper](#gatekeeper-the-app-is-not-notarized) below.
 3. Press **⌥S** (Option + S) — the palette opens over whatever you're doing.
    Type to find a session. **⏎** copies its context, **⌘L** makes a link,
    **⌘R** sends the result.
+
+> The published DMG is **v2.0.0**. The reviewer and mood tabs landed after it —
+> [build from source](#build-from-source) for those until the next release.
+
+### Gatekeeper: the app is not notarized
+
+Share-It is signed but **not notarized by Apple** (notarization needs a paid
+Developer ID). macOS therefore refuses the first launch of a double-click.
+
+- **Right-click → Open → Open** in the dialog. macOS remembers the choice; every
+  launch after that is normal.
+- If you get *"Share-It is damaged and can't be opened"*, the quarantine flag is
+  set. Clear it once:
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/share-it.app
+  ```
+- macOS 15+ may route you through **System Settings → Privacy & Security**, where
+  a **Open Anyway** button appears after the first blocked attempt.
+
+### Permissions it will ask for, and why
+
+Share-It asks for nothing at install. Prompts appear the first time you use a
+feature that needs one, and **every one of them is safe to decline** — you lose
+that one capability, not the app.
+
+| Prompt | Triggered by | If you decline |
+|---|---|---|
+| **Desktop / Documents / Downloads** | A session wrote a file there and you asked to copy, preview or share it | Files in that folder aren't offered; everything else works |
+| **Automation → Finder** | *Show in Finder*, *Get Info* | Those two menu items do nothing |
+| **Automation → Terminal / iTerm** | *Open where you left off* | Reopening a session in your terminal fails |
+| **Notifications** | Only if you turn on a **reviewer** | Reviews still run; they just don't interrupt you |
+
+Share-It does **not** need Accessibility — the **⌥S** hotkey uses Carbon's
+`RegisterEventHotKey`, not event monitoring — and it does **not** need Full Disk
+Access. It reads the session folders your AI tools already write to
+(`~/.claude`, `~/.codex`, and the rest) plus its own `~/.shareit`.
+
+If you deny something and change your mind: **System Settings → Privacy &
+Security → Files and Folders** (or **Automation**), find Share-It, toggle it on.
+
+### Reviewer and mood need your own CLI
+
+Both features shell out to the `claude` and `codex` you already have on your
+`PATH`, under your own account and limits. If a CLI isn't installed the feature
+stays idle — nothing breaks, and neither runs until you turn it on.
 
 ## One keystroke per job
 
